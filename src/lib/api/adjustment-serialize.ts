@@ -1,7 +1,11 @@
 import type { Prisma } from "@/generated/prisma/client"
 import type { AdjustmentStatus } from "@/generated/prisma/enums"
-import { AdjustmentKind } from "@/generated/prisma/enums"
+import {
+  AdjustmentKind,
+  BudgetCompilationGranularity,
+} from "@/generated/prisma/enums"
 import { serializeDecimal } from "@/lib/api/budget-serialize"
+import { formatBudgetPeriodLabel } from "@/lib/budget/period"
 
 export function computeLineAmountDelta(
   kind: AdjustmentKind,
@@ -228,8 +232,14 @@ export function serializeAdjustmentListItem(row: {
   approvalProcessId: string | null
   createdAt: Date
   updatedAt: Date
-  budgetHeader: { name: string; fiscalYear: number } | null
+  budgetHeader: {
+    name: string
+    fiscalYear: number
+    compilationGranularity: BudgetCompilationGranularity
+    periodUnit: number | null
+  } | null
 }) {
+  const bh = row.budgetHeader
   return {
     id: row.id,
     title: row.title,
@@ -239,8 +249,16 @@ export function serializeAdjustmentListItem(row: {
     status: row.status,
     totalDelta: serializeDecimal(row.totalDelta),
     budgetHeaderId: row.budgetHeaderId,
-    budgetName: row.budgetHeader?.name ?? null,
-    fiscalYear: row.budgetHeader?.fiscalYear ?? null,
+    budgetName: bh?.name ?? null,
+    fiscalYear: bh?.fiscalYear ?? null,
+    budgetPeriodLabel:
+      bh != null
+        ? formatBudgetPeriodLabel({
+            fiscalYear: bh.fiscalYear,
+            compilationGranularity: bh.compilationGranularity,
+            periodUnit: bh.periodUnit,
+          })
+        : null,
     approvalProcessId: row.approvalProcessId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

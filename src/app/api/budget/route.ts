@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma"
+import { BudgetCompilationGranularity } from "@/generated/prisma/enums"
+import { computeBudgetPeriod } from "@/lib/budget/period"
 import {
   budgetCreateBodySchema,
   budgetListQuerySchema,
@@ -26,6 +28,8 @@ function orderByFromQuery(
       return { name: sortOrder }
     case "fiscalYear":
       return { fiscalYear: sortOrder }
+    case "compilationGranularity":
+      return { compilationGranularity: sortOrder }
     case "status":
       return { status: sortOrder }
     case "version":
@@ -44,14 +48,25 @@ export async function GET(request: Request) {
     const parsed = budgetListQuerySchema.safeParse(raw)
     if (!parsed.success) return fromZodError(parsed.error)
 
-    const { page, pageSize, status, fiscalYear, q, sortBy, sortOrder } =
-      parsed.data
+    const {
+      page,
+      pageSize,
+      status,
+      fiscalYear,
+      compilationGranularity,
+      periodUnit,
+      q,
+      sortBy,
+      sortOrder,
+    } = parsed.data
     const skip = (page - 1) * pageSize
 
     const where: Prisma.BudgetHeaderWhereInput = {
       organizationId: auth.organizationId,
       ...(status !== undefined ? { status } : {}),
       ...(fiscalYear !== undefined ? { fiscalYear } : {}),
+      ...(compilationGranularity !== undefined ? { compilationGranularity } : {}),
+      ...(periodUnit !== undefined ? { periodUnit } : {}),
       ...(q
         ? {
             name: { contains: q, mode: "insensitive" },
@@ -99,8 +114,19 @@ export async function POST(request: Request) {
     if (!parsed.success) return fromZodError(parsed.error)
 
     const data = parsed.data
-    if (data.periodStart && data.periodEnd && data.periodStart > data.periodEnd) {
-      return fail("VALIDATION_ERROR", "periodStart 不能晚于 periodEnd", 400)
+    const granularity = data.compilationGranularity
+    const periodUnit =
+      granularity === BudgetCompilationGranularity.ANNUAL ? null : data.periodUnit
+
+    let bounds
+    try {
+      bounds = computeBudgetPeriod(data.fiscalYear, granularity, periodUnit)
+    } catch (e) {
+      return fail(
+        "VALIDATION_ERROR",
+        e instanceof Error ? e.message : "编制期间无效",
+        400
+      )
     }
 
     const subjectIds = data.lines.map((l) => l.subjectId)
@@ -123,11 +149,13 @@ export async function POST(request: Request) {
         data: {
           organizationId: auth.organizationId,
           fiscalYear: data.fiscalYear,
+          compilationGranularity: granularity,
+          periodUnit,
           name: data.name,
           code: data.code ?? null,
           currency: data.currency ?? "CNY",
-          periodStart: data.periodStart ? new Date(data.periodStart) : null,
-          periodEnd: data.periodEnd ? new Date(data.periodEnd) : null,
+          periodStart: bounds.periodStart,
+          periodEnd: bounds.periodEnd,
           compilationMethod: data.compilationMethod ?? null,
           approvalProcessId: data.approvalProcessId ?? null,
           createdById: actorId,

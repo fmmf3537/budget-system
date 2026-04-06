@@ -121,6 +121,7 @@ type BudgetDetail = {
   id: string
   name: string
   fiscalYear: number
+  periodLabel: string
   status: string
   totalAmount: string | null
   currency: string
@@ -157,6 +158,7 @@ type AdjustmentDetailPayload = {
     id: string
     name: string
     fiscalYear: number
+    periodLabel: string
     status: string
     totalAmount: string | null
     currency: string
@@ -522,7 +524,7 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
             <div>
               <CardTitle>预算单据</CardTitle>
               <CardDescription>
-                {data.budget.name} · {data.budget.fiscalYear} 年度
+                {data.budget.name} · {data.budget.periodLabel}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -646,8 +648,9 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
                 {data.adjustmentDetail.budgetHeader ? (
                   <>
                     <span className="mx-2">·</span>
-                    币种{" "}
-                    {data.adjustmentDetail.budgetHeader.currency}
+                    {data.adjustmentDetail.budgetHeader.periodLabel}
+                    <span className="mx-2">·</span>
+                    币种 {data.adjustmentDetail.budgetHeader.currency}
                   </>
                 ) : null}
               </div>

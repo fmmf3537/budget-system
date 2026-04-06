@@ -6,6 +6,7 @@ import {
   Prisma,
 } from "../src/generated/prisma/client"
 import {
+  BudgetCompilationGranularity,
   BudgetStatus,
   OrgStatus,
   UserStatus,
@@ -300,6 +301,8 @@ async function seedBudgetData() {
       data: {
         organizationId: demoOrgId,
         fiscalYear,
+        compilationGranularity: BudgetCompilationGranularity.ANNUAL,
+        periodUnit: null,
         code,
         name: `${fiscalYear} 年度示例预算（种子数据）`,
         status: BudgetStatus.DRAFT,

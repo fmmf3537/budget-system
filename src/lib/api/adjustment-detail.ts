@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { findBudgetDetail } from "@/lib/api/budget-queries"
 import { serializeDecimal } from "@/lib/api/budget-serialize"
+import { formatBudgetPeriodLabel } from "@/lib/budget/period"
 import {
   adjustmentWithDetailsInclude,
   buildBudgetSubjectComparison,
@@ -20,6 +21,7 @@ export type AdjustmentDetailApiPayload = {
     id: string
     name: string
     fiscalYear: number
+    periodLabel: string
     status: string
     totalAmount: string | null
     currency: string
@@ -60,6 +62,8 @@ export async function getAdjustmentDetailPayload(
           id: true,
           name: true,
           fiscalYear: true,
+          compilationGranularity: true,
+          periodUnit: true,
           status: true,
           totalAmount: true,
           currency: true,
@@ -95,6 +99,11 @@ export async function getAdjustmentDetailPayload(
           id: adj.budgetHeader.id,
           name: adj.budgetHeader.name,
           fiscalYear: adj.budgetHeader.fiscalYear,
+          periodLabel: formatBudgetPeriodLabel({
+            fiscalYear: adj.budgetHeader.fiscalYear,
+            compilationGranularity: adj.budgetHeader.compilationGranularity,
+            periodUnit: adj.budgetHeader.periodUnit,
+          }),
           status: adj.budgetHeader.status,
           totalAmount: serializeDecimal(adj.budgetHeader.totalAmount),
           currency: adj.budgetHeader.currency,

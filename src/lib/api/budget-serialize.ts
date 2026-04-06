@@ -1,4 +1,5 @@
 import type { BudgetHeader, BudgetLine, BudgetSubject } from "@/generated/prisma/client"
+import { formatBudgetPeriodLabel } from "@/lib/budget/period"
 
 export type BudgetLineWithSubject = BudgetLine & { subject: BudgetSubject }
 
@@ -45,6 +46,13 @@ export function serializeBudgetHeader(
     id: header.id,
     organizationId: header.organizationId,
     fiscalYear: header.fiscalYear,
+    compilationGranularity: header.compilationGranularity,
+    periodUnit: header.periodUnit,
+    periodLabel: formatBudgetPeriodLabel({
+      fiscalYear: header.fiscalYear,
+      compilationGranularity: header.compilationGranularity,
+      periodUnit: header.periodUnit,
+    }),
     code: header.code,
     name: header.name,
     status: header.status,

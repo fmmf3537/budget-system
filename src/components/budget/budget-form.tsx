@@ -17,7 +17,11 @@ import { z } from "zod"
 
 import { BUDGET_COMPILATION_METHODS } from "@/lib/api/budget-schemas"
 import { buildMockHeaders as buildMockAuthHeaders } from "@/lib/api/mock-headers"
-import { BudgetStatus } from "@/generated/prisma/enums"
+import { computeBudgetPeriod } from "@/lib/budget/period"
+import {
+  BudgetCompilationGranularity,
+  BudgetStatus,
+} from "@/generated/prisma/enums"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -46,6 +50,7 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -79,6 +84,12 @@ const STATUS_LABEL: Record<string, string> = {
   CLOSED: "已关闭",
 }
 
+const GRANULARITY_LABEL: Record<BudgetCompilationGranularity, string> = {
+  ANNUAL: "年度",
+  QUARTERLY: "季度",
+  MONTHLY: "月度",
+}
+
 const YEAR_OPTIONS = Array.from({ length: 15 }, (_, i) => 2018 + i)
 
 const moneyString = z
@@ -93,10 +104,10 @@ const budgetFormSchema = z
   .object({
     name: z.string().trim().min(1, "请输入预算名称").max(200),
     fiscalYear: z.number().int().min(1900).max(2100),
+    compilationGranularity: z.nativeEnum(BudgetCompilationGranularity),
+    periodUnit: z.number().int().min(1).max(12).nullable(),
     code: z.string().trim().max(64).optional(),
     currency: z.string().trim().min(1, "请输入币种").max(8),
-    periodStart: z.string().optional(),
-    periodEnd: z.string().optional(),
     compilationMethod: z
       .enum(BUDGET_COMPILATION_METHODS)
       .optional()
@@ -114,14 +125,27 @@ const budgetFormSchema = z
       })
     ),
   })
-  .refine(
-    (d) => {
-      if (d.periodStart && d.periodEnd && d.periodStart > d.periodEnd)
-        return false
-      return true
-    },
-    { message: "期间结束不能早于开始", path: ["periodEnd"] }
-  )
+  .superRefine((d, ctx) => {
+    if (d.compilationGranularity === BudgetCompilationGranularity.ANNUAL) return
+    if (d.periodUnit == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "请选择季度或月份",
+        path: ["periodUnit"],
+      })
+      return
+    }
+    if (
+      d.compilationGranularity === BudgetCompilationGranularity.QUARTERLY &&
+      (d.periodUnit < 1 || d.periodUnit > 4)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "请选择 Q1～Q4",
+        path: ["periodUnit"],
+      })
+    }
+  })
 
 export type BudgetFormValues = z.infer<typeof budgetFormSchema>
 
@@ -138,6 +162,9 @@ type BudgetDetailResponse = {
   version: number
   name: string
   fiscalYear: number
+  compilationGranularity: BudgetCompilationGranularity
+  periodUnit: number | null
+  periodLabel: string
   code: string | null
   currency: string
   compilationMethod: string | null
@@ -162,18 +189,6 @@ type ApiFail = {
   success: false
   data: null
   error: { code: string; message: string }
-}
-
-function isoDateToInput(iso: string | null | undefined): string {
-  if (!iso) return ""
-  return iso.slice(0, 10)
-}
-
-function dateInputToApi(s: string | undefined | null): string | null | undefined {
-  if (s === undefined) return undefined
-  const t = s?.trim()
-  if (!t) return null
-  return `${t}T00:00:00.000Z`
 }
 
 function formatMoney(n: number) {
@@ -227,10 +242,10 @@ export function BudgetForm({
     defaultValues: {
       name: "",
       fiscalYear: new Date().getFullYear(),
+      compilationGranularity: BudgetCompilationGranularity.ANNUAL,
+      periodUnit: null,
       code: "",
       currency: "CNY",
-      periodStart: "",
-      periodEnd: "",
       compilationMethod: null,
       lines: [emptyLine()],
     },
@@ -242,6 +257,31 @@ export function BudgetForm({
   })
 
   const watchedLines = useWatch({ control: form.control, name: "lines" })
+  const watchedFiscalYear = useWatch({ control: form.control, name: "fiscalYear" })
+  const watchedGranularity = useWatch({
+    control: form.control,
+    name: "compilationGranularity",
+  })
+  const watchedPeriodUnit = useWatch({ control: form.control, name: "periodUnit" })
+
+  const periodPreview = React.useMemo(() => {
+    const y = watchedFiscalYear ?? new Date().getFullYear()
+    const g =
+      watchedGranularity ??
+      BudgetCompilationGranularity.ANNUAL
+    const u = g === BudgetCompilationGranularity.ANNUAL ? null : watchedPeriodUnit
+    if (g !== BudgetCompilationGranularity.ANNUAL && u == null) return null
+    try {
+      const { periodStart, periodEnd } = computeBudgetPeriod(y, g, u)
+      return {
+        start: periodStart.toISOString().slice(0, 10),
+        end: periodEnd.toISOString().slice(0, 10),
+      }
+    } catch {
+      return null
+    }
+  }, [watchedFiscalYear, watchedGranularity, watchedPeriodUnit])
+
   const lineSum = React.useMemo(() => {
     const list = watchedLines ?? []
     return list.reduce((acc, row) => acc + (Number(row?.amount) || 0), 0)
@@ -307,10 +347,10 @@ export function BudgetForm({
         form.reset({
           name: d.name,
           fiscalYear: d.fiscalYear,
+          compilationGranularity: d.compilationGranularity,
+          periodUnit: d.periodUnit,
           code: d.code ?? "",
           currency: d.currency,
-          periodStart: isoDateToInput(d.periodStart),
-          periodEnd: isoDateToInput(d.periodEnd),
           compilationMethod:
             d.compilationMethod &&
             (BUDGET_COMPILATION_METHODS as readonly string[]).includes(
@@ -358,13 +398,16 @@ export function BudgetForm({
     }))
 
     const codeTrim = values.code?.trim()
+    const gran = values.compilationGranularity
+    const pu =
+      gran === BudgetCompilationGranularity.ANNUAL ? null : values.periodUnit
     const bodyBase = {
       name: values.name.trim(),
       fiscalYear: values.fiscalYear,
+      compilationGranularity: gran,
+      periodUnit: pu,
       code: codeTrim ? codeTrim : null,
       currency: values.currency.trim(),
-      periodStart: dateInputToApi(values.periodStart ?? ""),
-      periodEnd: dateInputToApi(values.periodEnd ?? ""),
       compilationMethod: values.compilationMethod ?? null,
       lines: linesPayload,
     }
@@ -398,10 +441,10 @@ export function BudgetForm({
     form.reset({
       name: d.name,
       fiscalYear: d.fiscalYear,
+      compilationGranularity: d.compilationGranularity,
+      periodUnit: d.periodUnit,
       code: d.code ?? "",
       currency: d.currency,
-      periodStart: isoDateToInput(d.periodStart),
-      periodEnd: isoDateToInput(d.periodEnd),
       compilationMethod:
         d.compilationMethod &&
         (BUDGET_COMPILATION_METHODS as readonly string[]).includes(
@@ -571,7 +614,7 @@ export function BudgetForm({
             <CardHeader>
               <CardTitle>基本信息</CardTitle>
               <CardDescription>
-                预算名称、会计年度、期间与编制方式
+                预算名称、编制粒度（月/季/年）、预算年度与编制方式；系统将自动计算期间起止
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-6 sm:grid-cols-2">
@@ -622,6 +665,122 @@ export function BudgetForm({
               />
               <FormField
                 control={form.control}
+                name="compilationGranularity"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>编制粒度</FormLabel>
+                    <Select
+                      disabled={!isEditable}
+                      value={field.value}
+                      onValueChange={(v: BudgetCompilationGranularity) => {
+                        field.onChange(v)
+                        if (v === BudgetCompilationGranularity.ANNUAL) {
+                          form.setValue("periodUnit", null)
+                        }
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择粒度" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {(
+                          Object.values(BudgetCompilationGranularity) as BudgetCompilationGranularity[]
+                        ).map((g) => (
+                          <SelectItem key={g} value={g}>
+                            {GRANULARITY_LABEL[g]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="periodUnit"
+                render={({ field }) => {
+                  const g = form.watch("compilationGranularity")
+                  if (g === BudgetCompilationGranularity.ANNUAL) {
+                    return (
+                      <FormItem>
+                        <FormLabel>期间细分</FormLabel>
+                        <p className="text-muted-foreground text-sm">
+                          年度编制涵盖整年，无需选择季/月
+                        </p>
+                      </FormItem>
+                    )
+                  }
+                  if (g === BudgetCompilationGranularity.QUARTERLY) {
+                    return (
+                      <FormItem>
+                        <FormLabel>季度</FormLabel>
+                        <Select
+                          disabled={!isEditable}
+                          value={field.value ? String(field.value) : ""}
+                          onValueChange={(v) =>
+                            field.onChange(Number.parseInt(v, 10))
+                          }
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择季度" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {[1, 2, 3, 4].map((q) => (
+                              <SelectItem key={q} value={String(q)}>
+                                Q{q}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )
+                  }
+                  return (
+                    <FormItem>
+                      <FormLabel>月份</FormLabel>
+                      <Select
+                        disabled={!isEditable}
+                        value={field.value ? String(field.value) : ""}
+                        onValueChange={(v) =>
+                          field.onChange(Number.parseInt(v, 10))
+                        }
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择月份" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map(
+                            (m) => (
+                              <SelectItem key={m} value={String(m)}>
+                                {m} 月
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )
+                }}
+              />
+              <div className="grid gap-2 sm:col-span-2">
+                <Label>期间预览（UTC 日历边界）</Label>
+                <p className="text-muted-foreground text-sm">
+                  {periodPreview
+                    ? `${periodPreview.start} ～ ${periodPreview.end}`
+                    : "请选择编制粒度与季度/月份"}
+                </p>
+              </div>
+              <FormField
+                control={form.control}
                 name="compilationMethod"
                 render={({ field }) => (
                   <FormItem>
@@ -647,32 +806,6 @@ export function BudgetForm({
                         ))}
                       </SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="periodStart"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>期间开始</FormLabel>
-                    <FormControl>
-                      <Input type="date" disabled={!isEditable} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="periodEnd"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>期间结束</FormLabel>
-                    <FormControl>
-                      <Input type="date" disabled={!isEditable} {...field} />
-                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

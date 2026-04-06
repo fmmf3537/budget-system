@@ -1,5 +1,6 @@
-import { BudgetStatus } from "@/generated/prisma/enums"
+import { BudgetCompilationGranularity, BudgetStatus } from "@/generated/prisma/enums"
 import { prisma } from "@/lib/prisma"
+import { computeBudgetPeriod } from "@/lib/budget/period"
 import { budgetUpdateBodySchema } from "@/lib/api/budget-schemas"
 import {
   findBudgetDetail,
@@ -63,8 +64,49 @@ export async function PUT(request: Request, ctx: RouteCtx) {
     }
 
     const patch = parsed.data
-    if (patch.periodStart && patch.periodEnd && patch.periodStart > patch.periodEnd) {
-      return fail("VALIDATION_ERROR", "periodStart 不能晚于 periodEnd", 400)
+
+    const periodKeysTouched =
+      patch.fiscalYear !== undefined ||
+      patch.compilationGranularity !== undefined ||
+      patch.periodUnit !== undefined
+
+    const nextYear = patch.fiscalYear ?? existing.fiscalYear
+    const nextGranularity =
+      patch.compilationGranularity ?? existing.compilationGranularity
+
+    let nextPeriodUnit: number | null =
+      patch.periodUnit !== undefined
+        ? patch.periodUnit
+        : existing.periodUnit
+    if (nextGranularity === BudgetCompilationGranularity.ANNUAL) {
+      nextPeriodUnit = null
+    }
+
+    let nextBounds: { periodStart: Date; periodEnd: Date } | undefined
+    if (periodKeysTouched) {
+      if (
+        nextGranularity !== BudgetCompilationGranularity.ANNUAL &&
+        nextPeriodUnit == null
+      ) {
+        return fail(
+          "VALIDATION_ERROR",
+          "季度或月度编制必须指定 periodUnit",
+          400
+        )
+      }
+      try {
+        nextBounds = computeBudgetPeriod(
+          nextYear,
+          nextGranularity,
+          nextPeriodUnit
+        )
+      } catch (e) {
+        return fail(
+          "VALIDATION_ERROR",
+          e instanceof Error ? e.message : "编制期间无效",
+          400
+        )
+      }
     }
 
     if (patch.lines !== undefined) {
@@ -88,16 +130,20 @@ export async function PUT(request: Request, ctx: RouteCtx) {
       await tx.budgetHeader.update({
         where: { id },
         data: {
-          ...(patch.fiscalYear !== undefined ? { fiscalYear: patch.fiscalYear } : {}),
           ...(patch.name !== undefined ? { name: patch.name } : {}),
           ...(patch.code !== undefined ? { code: patch.code } : {}),
           ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
-          ...(patch.periodStart !== undefined
-            ? { periodStart: patch.periodStart ? new Date(patch.periodStart) : null }
-            : {}),
-          ...(patch.periodEnd !== undefined
-            ? { periodEnd: patch.periodEnd ? new Date(patch.periodEnd) : null }
-            : {}),
+          ...(periodKeysTouched && nextBounds
+            ? {
+                fiscalYear: nextYear,
+                compilationGranularity: nextGranularity,
+                periodUnit: nextPeriodUnit,
+                periodStart: nextBounds.periodStart,
+                periodEnd: nextBounds.periodEnd,
+              }
+            : patch.fiscalYear !== undefined
+              ? { fiscalYear: patch.fiscalYear }
+              : {}),
           ...(patch.compilationMethod !== undefined
             ? { compilationMethod: patch.compilationMethod }
             : {}),

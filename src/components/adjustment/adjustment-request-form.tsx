@@ -143,6 +143,7 @@ type BudgetListItem = {
   id: string
   name: string
   fiscalYear: number
+  periodLabel: string
   status: string
   totalAmount: string | null
 }
@@ -471,7 +472,7 @@ export function AdjustmentRequestForm() {
                         <SelectItem value={NONE}>请选择原预算</SelectItem>
                         {budgets.map((b) => (
                           <SelectItem key={b.id} value={b.id}>
-                            {b.name}（{b.fiscalYear} · {b.status}）
+                            {b.name}（{b.periodLabel} · {b.status}）
                           </SelectItem>
                         ))}
                       </SelectContent>

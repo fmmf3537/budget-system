@@ -1,5 +1,8 @@
 import { create } from "zustand"
-import { BudgetStatus } from "@/generated/prisma/enums"
+import {
+  BudgetCompilationGranularity,
+  BudgetStatus,
+} from "@/generated/prisma/enums"
 import { DEFAULT_USER_ROLE } from "@/lib/auth/roles"
 import type { UserRoleType } from "@/lib/auth/roles"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
@@ -8,6 +11,9 @@ export type BudgetListItem = {
   id: string
   organizationId: string
   fiscalYear: number
+  compilationGranularity: BudgetCompilationGranularity
+  periodUnit: number | null
+  periodLabel: string
   code: string | null
   name: string
   status: string
@@ -57,6 +63,10 @@ type BudgetStoreState = {
   draftNameQuery: string
   status: BudgetStatus | null
   fiscalYear: number | null
+  /** 列表筛选：编制粒度；null 表示不限 */
+  compilationGranularityFilter: BudgetCompilationGranularity | null
+  /** 与筛选粒度配套：季度 1–4 或月份 1–12；年度粒度时忽略 */
+  periodUnitFilter: number | null
   mockOrgId: string
   mockUserId: string
   mockUserRole: UserRoleType
@@ -68,6 +78,10 @@ type BudgetStoreState = {
   setDraftNameQuery: (v: string) => void
   setStatus: (v: BudgetStatus | null) => void
   setFiscalYear: (v: number | null) => void
+  setCompilationGranularityFilter: (
+    v: BudgetCompilationGranularity | null
+  ) => void
+  setPeriodUnitFilter: (v: number | null) => void
   setMockOrgId: (v: string) => void
   setMockUserId: (v: string) => void
   setMockUserRole: (v: UserRoleType) => void
@@ -105,6 +119,8 @@ export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
   draftNameQuery: "",
   status: null,
   fiscalYear: null,
+  compilationGranularityFilter: null,
+  periodUnitFilter: null,
   mockOrgId: "demo-org",
   mockUserId: "demo-user",
   mockUserRole: DEFAULT_USER_ROLE,
@@ -114,6 +130,9 @@ export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
   setDraftNameQuery: (draftNameQuery) => set({ draftNameQuery }),
   setStatus: (status) => set({ status }),
   setFiscalYear: (fiscalYear) => set({ fiscalYear }),
+  setCompilationGranularityFilter: (compilationGranularityFilter) =>
+    set({ compilationGranularityFilter, periodUnitFilter: null }),
+  setPeriodUnitFilter: (periodUnitFilter) => set({ periodUnitFilter }),
   setMockOrgId: (mockOrgId) => set({ mockOrgId }),
   setMockUserId: (mockUserId) => set({ mockUserId }),
   setMockUserRole: (mockUserRole) => set({ mockUserRole }),
@@ -159,6 +178,8 @@ export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
       nameQuery,
       status,
       fiscalYear,
+      compilationGranularityFilter,
+      periodUnitFilter,
       mockOrgId,
       mockUserId,
       mockUserRole,
@@ -173,6 +194,15 @@ export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
       if (nameQuery) qs.set("q", nameQuery)
       if (status) qs.set("status", status)
       if (fiscalYear != null) qs.set("fiscalYear", String(fiscalYear))
+      if (compilationGranularityFilter != null) {
+        qs.set("compilationGranularity", compilationGranularityFilter)
+        if (
+          compilationGranularityFilter !== BudgetCompilationGranularity.ANNUAL &&
+          periodUnitFilter != null
+        ) {
+          qs.set("periodUnit", String(periodUnitFilter))
+        }
+      }
 
       const res = await fetch(`/api/budget?${qs.toString()}`, {
         headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),

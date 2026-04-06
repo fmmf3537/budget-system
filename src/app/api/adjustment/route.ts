@@ -69,7 +69,12 @@ export async function GET(request: Request) {
         take: pageSize,
         include: {
           budgetHeader: {
-            select: { name: true, fiscalYear: true },
+            select: {
+              name: true,
+              fiscalYear: true,
+              compilationGranularity: true,
+              periodUnit: true,
+            },
           },
         },
       }),

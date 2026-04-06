@@ -98,6 +98,7 @@ type ListItem = {
   budgetHeaderId: string | null
   budgetName: string | null
   fiscalYear: number | null
+  budgetPeriodLabel: string | null
   approvalProcessId: string | null
   createdAt: string
   updatedAt: string
@@ -340,7 +341,12 @@ export function AdjustmentListClient() {
                         {row.budgetName ? (
                           <>
                             {row.budgetName}
-                            {row.fiscalYear != null ? (
+                            {row.budgetPeriodLabel ? (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                · {row.budgetPeriodLabel}
+                              </span>
+                            ) : row.fiscalYear != null ? (
                               <span className="text-muted-foreground">
                                 {" "}
                                 · {row.fiscalYear} 年
@@ -467,7 +473,8 @@ export function AdjustmentListClient() {
                     {detail.budgetHeader ? (
                       <>
                         {" "}
-                        · 币种 {detail.budgetHeader.currency}
+                        · {detail.budgetHeader.periodLabel} · 币种{" "}
+                        {detail.budgetHeader.currency}
                       </>
                     ) : null}
                   </CardDescription>

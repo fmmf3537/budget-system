@@ -10,7 +10,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { BudgetStatus } from "@/generated/prisma/enums"
+import {
+  BudgetCompilationGranularity,
+  BudgetStatus,
+} from "@/generated/prisma/enums"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -70,6 +73,12 @@ const STATUS_LABEL: Record<string, string> = {
 
 const YEAR_OPTIONS = Array.from({ length: 15 }, (_, i) => 2018 + i)
 
+const GRANULARITY_LABEL: Record<BudgetCompilationGranularity, string> = {
+  ANNUAL: "年度",
+  QUARTERLY: "季度",
+  MONTHLY: "月度",
+}
+
 function statusBadgeVariant(
   status: string
 ): "default" | "secondary" | "outline" | "destructive" {
@@ -103,12 +112,20 @@ export default function BudgetListPage() {
   const draftNameQuery = useBudgetStore((s) => s.draftNameQuery)
   const status = useBudgetStore((s) => s.status)
   const fiscalYear = useBudgetStore((s) => s.fiscalYear)
+  const compilationGranularityFilter = useBudgetStore(
+    (s) => s.compilationGranularityFilter
+  )
+  const periodUnitFilter = useBudgetStore((s) => s.periodUnitFilter)
   const mockOrgId = useBudgetStore((s) => s.mockOrgId)
   const mockUserId = useBudgetStore((s) => s.mockUserId)
 
   const setDraftNameQuery = useBudgetStore((s) => s.setDraftNameQuery)
   const setStatus = useBudgetStore((s) => s.setStatus)
   const setFiscalYear = useBudgetStore((s) => s.setFiscalYear)
+  const setCompilationGranularityFilter = useBudgetStore(
+    (s) => s.setCompilationGranularityFilter
+  )
+  const setPeriodUnitFilter = useBudgetStore((s) => s.setPeriodUnitFilter)
   const setMockOrgId = useBudgetStore((s) => s.setMockOrgId)
   const setMockUserId = useBudgetStore((s) => s.setMockUserId)
   const applyFilters = useBudgetStore((s) => s.applyFilters)
@@ -172,13 +189,13 @@ export default function BudgetListPage() {
         <CardHeader className="border-b">
           <CardTitle>筛选条件</CardTitle>
           <CardDescription>
-            期间按预算年度（fiscalYear）筛选；组织、用户对应{" "}
+            按预算年度与编制粒度（月/季/年）筛选；组织、用户对应{" "}
             <code className="text-xs">x-mock-org-id</code> /{" "}
             <code className="text-xs">x-mock-user-id</code>。
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="grid gap-2">
               <Label htmlFor="bq-name">名称搜索</Label>
               <div className="relative">
@@ -196,7 +213,7 @@ export default function BudgetListPage() {
               </div>
             </div>
             <div className="grid gap-2">
-              <Label>期间（年度）</Label>
+              <Label>预算年度</Label>
               <Select
                 value={fiscalYear == null ? "all" : String(fiscalYear)}
                 onValueChange={(v) =>
@@ -213,6 +230,101 @@ export default function BudgetListPage() {
                       {y} 年
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>编制粒度</Label>
+              <Select
+                value={compilationGranularityFilter ?? "all"}
+                onValueChange={(v) =>
+                  setCompilationGranularityFilter(
+                    v === "all" ? null : (v as BudgetCompilationGranularity)
+                  )
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="全部粒度" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部粒度</SelectItem>
+                  {(
+                    Object.values(
+                      BudgetCompilationGranularity
+                    ) as BudgetCompilationGranularity[]
+                  ).map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {GRANULARITY_LABEL[g]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>
+                {compilationGranularityFilter ===
+                BudgetCompilationGranularity.QUARTERLY
+                  ? "季度"
+                  : compilationGranularityFilter ===
+                      BudgetCompilationGranularity.MONTHLY
+                    ? "月份"
+                    : "季度/月"}
+              </Label>
+              <Select
+                value={
+                  periodUnitFilter == null ? "all" : String(periodUnitFilter)
+                }
+                onValueChange={(v) =>
+                  setPeriodUnitFilter(
+                    v === "all" ? null : Number.parseInt(v, 10)
+                  )
+                }
+                disabled={
+                  compilationGranularityFilter == null ||
+                  compilationGranularityFilter ===
+                    BudgetCompilationGranularity.ANNUAL
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      compilationGranularityFilter ===
+                      BudgetCompilationGranularity.QUARTERLY
+                        ? "全部季度"
+                        : compilationGranularityFilter ===
+                            BudgetCompilationGranularity.MONTHLY
+                          ? "全部月份"
+                          : "先选粒度"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {compilationGranularityFilter ===
+                    BudgetCompilationGranularity.QUARTERLY
+                      ? "全部季度"
+                      : compilationGranularityFilter ===
+                          BudgetCompilationGranularity.MONTHLY
+                        ? "全部月份"
+                        : "不限"}
+                  </SelectItem>
+                  {compilationGranularityFilter ===
+                  BudgetCompilationGranularity.QUARTERLY
+                    ? [1, 2, 3, 4].map((q) => (
+                        <SelectItem key={q} value={String(q)}>
+                          Q{q}
+                        </SelectItem>
+                      ))
+                    : compilationGranularityFilter ===
+                        BudgetCompilationGranularity.MONTHLY
+                      ? Array.from({ length: 12 }, (_, i) => i + 1).map(
+                          (m) => (
+                            <SelectItem key={m} value={String(m)}>
+                              {m} 月
+                            </SelectItem>
+                          )
+                        )
+                      : null}
                 </SelectContent>
               </Select>
             </div>
@@ -246,7 +358,7 @@ export default function BudgetListPage() {
                 onChange={(e) => setMockOrgId(e.target.value)}
               />
             </div>
-            <div className="grid gap-2 sm:col-span-2 lg:col-span-4">
+            <div className="grid gap-2 sm:col-span-2 xl:col-span-6">
               <Label htmlFor="bq-user">用户（mock）</Label>
               <Input
                 id="bq-user"
@@ -313,7 +425,7 @@ export default function BudgetListPage() {
                   <TableHead>名称</TableHead>
                   <TableHead>编码</TableHead>
                   <TableHead>年度</TableHead>
-                  <TableHead>期间</TableHead>
+                  <TableHead>编制期间</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="text-right">金额</TableHead>
                   <TableHead className="w-[72px] text-right">操作</TableHead>
@@ -339,9 +451,14 @@ export default function BudgetListPage() {
                         {row.code ?? "—"}
                       </TableCell>
                       <TableCell>{row.fiscalYear}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {formatShortDate(row.periodStart)} ~{" "}
-                        {formatShortDate(row.periodEnd)}
+                      <TableCell className="max-w-[220px] text-xs">
+                        <div className="text-foreground font-medium">
+                          {row.periodLabel}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {formatShortDate(row.periodStart)} ~{" "}
+                          {formatShortDate(row.periodEnd)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusBadgeVariant(row.status)}>

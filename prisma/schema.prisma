@@ -20,6 +20,13 @@ enum BudgetStatus {
   CLOSED
 }
 
+/// 预算编制时间粒度：年度 / 季度 / 月度（自然年、自然季、自然月）
+enum BudgetCompilationGranularity {
+  ANNUAL
+  QUARTERLY
+  MONTHLY
+}
+
 enum ApprovalBizType {
   BUDGET
   BUDGET_ADJUSTMENT
@@ -189,6 +196,9 @@ model BudgetHeader {
   currency           String       @default("CNY")
   periodStart        DateTime?
   periodEnd          DateTime?
+  compilationGranularity BudgetCompilationGranularity @default(ANNUAL)
+  /// ANNUAL: null；QUARTERLY: 1–4；MONTHLY: 1–12
+  periodUnit         Int?
   /// 编制方法编码，如 ZERO_BASE / INCREMENTAL 等
   compilationMethod  String?     @db.VarChar(64)
   version            Int          @default(1)
@@ -208,6 +218,7 @@ model BudgetHeader {
   adjustments      BudgetAdjustment[]
 
   @@index([organizationId, fiscalYear])
+  @@index([organizationId, fiscalYear, compilationGranularity, periodUnit])
   @@index([status])
   @@map("budget_header")
 }
