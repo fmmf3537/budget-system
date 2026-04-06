@@ -1,0 +1,488 @@
+// Budget system domain — PostgreSQL
+// Table names: snake_case via @@map (User -> users: avoids reserved keyword "user")
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Enums ---
+
+enum BudgetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum ApprovalBizType {
+  BUDGET
+  BUDGET_ADJUSTMENT
+  CASH_PLAN
+  OTHER
+}
+
+enum ApprovalAction {
+  PENDING
+  APPROVED
+  REJECTED
+  TRANSFERRED
+  CANCELLED
+}
+
+enum AdjustmentStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+/// 预算调整类型
+enum AdjustmentKind {
+  INCREASE
+  DECREASE
+  SUBJECT_TRANSFER
+  ROLLING
+}
+
+enum CashPlanStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  CLOSED
+}
+
+enum WarningSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// --- Core org & auth ---
+
+model Organization {
+  id        String     @id @default(cuid())
+  code      String?    @unique
+  name      String
+  parentId  String?
+  status    OrgStatus  @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  parent   Organization?  @relation("OrgTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Organization[]   @relation("OrgTree")
+
+  users              User[]
+  budgetSubjects     BudgetSubject[]
+  budgetHeaders      BudgetHeader[]
+  approvalProcesses  ApprovalProcess[]
+  budgetAdjustments  BudgetAdjustment[]
+  cashPlanHeaders    CashPlanHeader[]
+  cashFlowForecasts  CashFlowForecast[]
+  warningRecords     WarningRecord[]
+
+  budgetTemplateSettings OrgBudgetTemplateSettings?
+
+  @@index([parentId])
+  @@map("organization")
+}
+
+/// 组织级预算模板：维度列显示名、启用的编制方法等
+model OrgBudgetTemplateSettings {
+  id                        String   @id @default(cuid())
+  organizationId            String   @unique
+  /// 预算明细中「部门/组织编码」列的显示名称
+  departmentFieldLabel      String?  @db.VarChar(64)
+  dimension1Label           String?  @db.VarChar(64)
+  dimension2Label           String?  @db.VarChar(64)
+  /// 编制页可选的编制方法编码列表（如 ZERO_BASE）
+  enabledCompilationMethods String[] @default([])
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("org_budget_template_settings")
+}
+
+model User {
+  id             String     @id @default(cuid())
+  organizationId String
+  email          String     @unique
+  name           String
+  passwordHash   String?
+  role           String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  budgetHeadersCreated   BudgetHeader[]      @relation("BudgetHeaderCreatedBy")
+  budgetHeadersUpdated   BudgetHeader[]      @relation("BudgetHeaderUpdatedBy")
+  budgetAdjustments      BudgetAdjustment[]  @relation("BudgetAdjustmentRequester")
+  cashPlansCreated       CashPlanHeader[]    @relation("CashPlanCreatedBy")
+  approvalRecords        ApprovalRecord[]    @relation("ApprovalRecordActor")
+  approvalNodes          ApprovalNode[]      @relation("ApprovalNodeApprover")
+  adjustmentHistories    AdjustmentHistory[] @relation("AdjustmentHistoryOperator")
+  warningsResolved       WarningRecord[]     @relation("WarningResolvedBy")
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// --- Budget subject & budget documents ---
+
+model BudgetSubject {
+  id             String   @id @default(cuid())
+  organizationId String?
+  parentId       String?
+  code           String
+  name           String
+  level          Int?
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  parent       BudgetSubject?  @relation("SubjectTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     BudgetSubject[] @relation("SubjectTree")
+
+  budgetLines                 BudgetLine[]
+  adjustmentDetailsAsLegacy   AdjustmentDetail[] @relation("AdjustmentDetailLegacySubject")
+  adjustmentDetailsAsSource   AdjustmentDetail[] @relation("AdjustmentDetailSourceSubject")
+  adjustmentDetailsAsTarget   AdjustmentDetail[] @relation("AdjustmentDetailTargetSubject")
+
+  @@unique([organizationId, code])
+  @@index([parentId])
+  @@index([organizationId])
+  @@map("budget_subject")
+}
+
+model BudgetHeader {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  fiscalYear         Int
+  code               String?
+  name               String
+  status             BudgetStatus @default(DRAFT)
+  totalAmount        Decimal?     @db.Decimal(18, 2)
+  currency           String       @default("CNY")
+  periodStart        DateTime?
+  periodEnd          DateTime?
+  /// 编制方法编码，如 ZERO_BASE / INCREMENTAL 等
+  compilationMethod  String?     @db.VarChar(64)
+  version            Int          @default(1)
+  createdById        String?
+  updatedById        String?
+  submittedAt        DateTime?
+  approvedAt         DateTime?
+  approvalProcessId  String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy        User?             @relation("BudgetHeaderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy        User?             @relation("BudgetHeaderUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  approvalProcess  ApprovalProcess?  @relation(fields: [approvalProcessId], references: [id], onDelete: SetNull)
+  lines            BudgetLine[]
+  adjustments      BudgetAdjustment[]
+
+  @@index([organizationId, fiscalYear])
+  @@index([status])
+  @@map("budget_header")
+}
+
+model BudgetLine {
+  id              String   @id @default(cuid())
+  headerId        String
+  subjectId       String
+  amount          Decimal  @db.Decimal(18, 2)
+  amountYtd       Decimal? @db.Decimal(18, 2)
+  remark          String?
+  departmentCode  String?
+  dimension1      String?
+  dimension2      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  header  BudgetHeader  @relation(fields: [headerId], references: [id], onDelete: Cascade)
+  subject BudgetSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  adjustmentDetails AdjustmentDetail[]
+  adjustments       BudgetAdjustment[] @relation("BudgetAdjustmentLine")
+
+  @@index([headerId])
+  @@index([subjectId])
+  @@map("budget_line")
+}
+
+// --- Approval ---
+
+model ApprovalProcess {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  bizType        ApprovalBizType
+  version        Int             @default(1)
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  nodes          ApprovalNode[]
+  records        ApprovalRecord[]
+  budgetHeaders  BudgetHeader[]
+  adjustments    BudgetAdjustment[] @relation("AdjustmentApprovalProcess")
+  cashPlans      CashPlanHeader[]   @relation("CashPlanApprovalProcess")
+
+  @@index([organizationId, bizType])
+  @@map("approval_process")
+}
+
+model ApprovalNode {
+  id               String   @id @default(cuid())
+  processId        String
+  sortOrder        Int
+  name             String
+  approverUserId   String?
+  approverRole     String?
+  isParallelGroup  Boolean  @default(false)
+  /// 预算路由：单据总额下限（含）；空表示不限制
+  minTotalAmount   Decimal? @db.Decimal(18, 2)
+  /// 预算路由：单据总额上限（含）；空表示不限制
+  maxTotalAmount   Decimal? @db.Decimal(18, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  process        ApprovalProcess  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  approverUser   User?            @relation("ApprovalNodeApprover", fields: [approverUserId], references: [id], onDelete: SetNull)
+  approvalRecords ApprovalRecord[]
+
+  @@index([processId])
+  @@map("approval_node")
+}
+
+model ApprovalRecord {
+  id          String         @id @default(cuid())
+  processId   String
+  nodeId      String?
+  actorUserId String?
+  action      ApprovalAction @default(PENDING)
+  comment     String?
+  entityType  String
+  entityId    String
+  actedAt     DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  process   ApprovalProcess @relation(fields: [processId], references: [id], onDelete: Cascade)
+  node      ApprovalNode?   @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  actorUser User?           @relation("ApprovalRecordActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([processId])
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@map("approval_record")
+}
+
+// --- Budget adjustment ---
+
+model BudgetAdjustment {
+  id                String           @id @default(cuid())
+  organizationId    String
+  budgetHeaderId    String?
+  budgetLineId      String?
+  title             String?
+  reason            String
+  kind              AdjustmentKind   @default(INCREASE)
+  status            AdjustmentStatus @default(DRAFT)
+  totalDelta        Decimal?         @db.Decimal(18, 2)
+  requesterId       String?
+  approvalProcessId String?
+  attachmentName    String?          @db.VarChar(256)
+  attachmentMime    String?          @db.VarChar(128)
+  /// 演示用 Base64，生产建议改为对象存储 key
+  attachmentDataBase64 String?       @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  budgetHeader    BudgetHeader?    @relation(fields: [budgetHeaderId], references: [id], onDelete: SetNull)
+  budgetLine      BudgetLine?      @relation("BudgetAdjustmentLine", fields: [budgetLineId], references: [id], onDelete: SetNull)
+  requester       User?            @relation("BudgetAdjustmentRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  approvalProcess ApprovalProcess? @relation("AdjustmentApprovalProcess", fields: [approvalProcessId], references: [id], onDelete: SetNull)
+  details         AdjustmentDetail[]
+  histories       AdjustmentHistory[]
+
+  @@index([organizationId])
+  @@index([budgetHeaderId])
+  @@index([status])
+  @@map("budget_adjustment")
+}
+
+model AdjustmentDetail {
+  id           String   @id @default(cuid())
+  adjustmentId String
+  budgetLineId String?
+  /// 兼容旧字段：默认与 sourceSubjectId 同步写入
+  subjectId    String?
+  sourceSubjectId String?
+  targetSubjectId String?
+  sourceProject   String? @db.VarChar(200)
+  targetProject   String? @db.VarChar(200)
+  amountDelta  Decimal  @db.Decimal(18, 2)
+  remark       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  budgetLine BudgetLine?      @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
+  subject    BudgetSubject?   @relation("AdjustmentDetailLegacySubject", fields: [subjectId], references: [id], onDelete: SetNull)
+  sourceSubject BudgetSubject? @relation("AdjustmentDetailSourceSubject", fields: [sourceSubjectId], references: [id], onDelete: SetNull)
+  targetSubject BudgetSubject? @relation("AdjustmentDetailTargetSubject", fields: [targetSubjectId], references: [id], onDelete: SetNull)
+
+  @@index([adjustmentId])
+  @@map("adjustment_detail")
+}
+
+model AdjustmentHistory {
+  id           String   @id @default(cuid())
+  adjustmentId String
+  summary      String
+  action       String
+  payload      Json?    @db.JsonB
+  operatorId   String?
+  occurredAt   DateTime @default(now())
+
+  adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  operator   User?            @relation("AdjustmentHistoryOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@index([adjustmentId])
+  @@index([occurredAt])
+  @@map("adjustment_history")
+}
+
+// --- Cash plan & forecast ---
+
+model CashPlanHeader {
+  id                String         @id @default(cuid())
+  organizationId    String
+  name              String?
+  periodStart       DateTime
+  periodEnd         DateTime
+  status            CashPlanStatus @default(DRAFT)
+  /// 计划期初现金余额（用于预测）
+  openingBalance    Decimal?       @db.Decimal(18, 2)
+  /// 安全水位：预测期末低于此值时提示风险
+  safetyWaterLevel  Decimal?       @db.Decimal(18, 2)
+  createdById       String?
+  approvalProcessId String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy       User?            @relation("CashPlanCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvalProcess ApprovalProcess? @relation("CashPlanApprovalProcess", fields: [approvalProcessId], references: [id], onDelete: SetNull)
+  incomes         CashPlanIncome[]
+  expenses        CashPlanExpense[]
+
+  @@index([organizationId])
+  @@index([periodStart, periodEnd])
+  @@map("cash_plan_header")
+}
+
+model CashPlanIncome {
+  id            String    @id @default(cuid())
+  headerId      String
+  category      String?
+  amount        Decimal   @db.Decimal(18, 2)
+  expectedDate  DateTime?
+  remark        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  header CashPlanHeader @relation(fields: [headerId], references: [id], onDelete: Cascade)
+
+  @@index([headerId])
+  @@map("cash_plan_income")
+}
+
+model CashPlanExpense {
+  id            String    @id @default(cuid())
+  headerId      String
+  category      String?
+  amount        Decimal   @db.Decimal(18, 2)
+  expectedDate  DateTime?
+  remark        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  header CashPlanHeader @relation(fields: [headerId], references: [id], onDelete: Cascade)
+
+  @@index([headerId])
+  @@map("cash_plan_expense")
+}
+
+model CashFlowForecast {
+  id              String   @id @default(cuid())
+  organizationId  String
+  periodStart     DateTime
+  periodEnd       DateTime
+  openingBalance  Decimal  @db.Decimal(18, 2)
+  inflowTotal     Decimal  @db.Decimal(18, 2)
+  outflowTotal    Decimal  @db.Decimal(18, 2)
+  closingBalance  Decimal? @db.Decimal(18, 2)
+  source          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([periodStart, periodEnd])
+  @@map("cash_flow_forecast")
+}
+
+// --- Warnings ---
+
+model WarningRecord {
+  id             String          @id @default(cuid())
+  organizationId String
+  type           String
+  severity       WarningSeverity @default(MEDIUM)
+  message        String
+  entityType     String?
+  entityId       String?
+  isResolved     Boolean         @default(false)
+  resolvedAt     DateTime?
+  resolvedById   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  resolvedBy   User?        @relation("WarningResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, isResolved])
+  @@index([entityType, entityId])
+  @@map("warning_record")
+}
