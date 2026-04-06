@@ -78,6 +78,12 @@ enum OrgStatus {
   INACTIVE
 }
 
+/// 资金计划收支类别：流入 / 流出
+enum CashPlanCategoryKind {
+  INCOME
+  EXPENSE
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -107,6 +113,9 @@ model Organization {
   warningRecords     WarningRecord[]
 
   budgetTemplateSettings OrgBudgetTemplateSettings?
+  budgetDepartments      BudgetDepartment[]
+  budgetDimensionValues  BudgetDimensionValue[]
+  cashPlanCategories     CashPlanCategory[]
 
   @@index([parentId])
   @@map("organization")
@@ -183,6 +192,63 @@ model BudgetSubject {
   @@index([parentId])
   @@index([organizationId])
   @@map("budget_subject")
+}
+
+/// 预算编制用部门/成本中心编码（写入 BudgetLine.departmentCode）
+model BudgetDepartment {
+  id             String   @id @default(cuid())
+  organizationId String
+  code           String   @db.VarChar(64)
+  name           String   @db.VarChar(200)
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("budget_department")
+}
+
+/// 预算维度1/2 可选值（写入 BudgetLine.dimension1 / dimension2，存编码）
+model BudgetDimensionValue {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// 1 = 维度1，2 = 维度2
+  slot           Int
+  code           String   @db.VarChar(128)
+  name           String   @db.VarChar(200)
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, slot, code])
+  @@index([organizationId, slot])
+  @@map("budget_dimension_value")
+}
+
+/// 资金计划流入/流出类别（写入 CashPlanIncome/Expense.category，存编码）
+model CashPlanCategory {
+  id             String               @id @default(cuid())
+  organizationId String
+  kind           CashPlanCategoryKind
+  code           String               @db.VarChar(64)
+  name           String               @db.VarChar(200)
+  sortOrder      Int                  @default(0)
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, kind, code])
+  @@index([organizationId, kind])
+  @@map("cash_plan_category")
 }
 
 model BudgetHeader {

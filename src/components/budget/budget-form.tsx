@@ -17,6 +17,13 @@ import { z } from "zod"
 
 import { BUDGET_COMPILATION_METHODS } from "@/lib/api/budget-schemas"
 import { buildMockHeaders as buildMockAuthHeaders } from "@/lib/api/mock-headers"
+import {
+  buildEmptyBudgetTemplateBuffer,
+  readBudgetLinesFromExcelBuffer,
+  writeBudgetLinesExcelBuffer,
+  type BudgetExcelRowError,
+  type BudgetExcelFormLine,
+} from "@/lib/budget/excel-budget-lines"
 import { computeBudgetPeriod } from "@/lib/budget/period"
 import {
   BudgetCompilationGranularity,
@@ -58,6 +65,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
   TableBody,
@@ -212,6 +220,72 @@ function emptyLine(): BudgetFormValues["lines"][number] {
   }
 }
 
+type CodeName = { code: string; name: string }
+
+const LINE_SELECT_NONE = "__none__"
+const LINE_ORPHAN_PREFIX = "__orphan__"
+
+function BudgetLineCodeSelect({
+  options,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+}: {
+  options: CodeName[]
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+  placeholder?: string
+}) {
+  if (options.length === 0) {
+    return (
+      <Input
+        disabled={disabled}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )
+  }
+  const trimmed = value ?? ""
+  const inList = Boolean(trimmed && options.some((o) => o.code === trimmed))
+  const selectValue =
+    !trimmed ? LINE_SELECT_NONE : inList ? trimmed : `${LINE_ORPHAN_PREFIX}${trimmed}`
+
+  return (
+    <Select
+      disabled={disabled}
+      value={selectValue}
+      onValueChange={(v) => {
+        if (v === LINE_SELECT_NONE) onChange("")
+        else if (v.startsWith(LINE_ORPHAN_PREFIX))
+          onChange(v.slice(LINE_ORPHAN_PREFIX.length))
+        else onChange(v)
+      }}
+    >
+      <FormControl>
+        <SelectTrigger className="w-full min-w-[120px]">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+      </FormControl>
+      <SelectContent>
+        <SelectItem value={LINE_SELECT_NONE}>（空）</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o.code} value={o.code}>
+            {o.code} · {o.name}
+          </SelectItem>
+        ))}
+        {!inList && trimmed ? (
+          <SelectItem value={`${LINE_ORPHAN_PREFIX}${trimmed}`}>
+            未登记：{trimmed}
+          </SelectItem>
+        ) : null}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export function BudgetForm({
   mode,
   budgetId,
@@ -226,6 +300,18 @@ export function BudgetForm({
 
   const [subjects, setSubjects] = React.useState<SubjectOption[]>([])
   const [subjectsLoading, setSubjectsLoading] = React.useState(true)
+  const [tplLabels, setTplLabels] = React.useState<{
+    departmentFieldLabel: string | null
+    dimension1Label: string | null
+    dimension2Label: string | null
+  }>({
+    departmentFieldLabel: null,
+    dimension1Label: null,
+    dimension2Label: null,
+  })
+  const [deptOptions, setDeptOptions] = React.useState<CodeName[]>([])
+  const [dim1Options, setDim1Options] = React.useState<CodeName[]>([])
+  const [dim2Options, setDim2Options] = React.useState<CodeName[]>([])
   const [detailLoading, setDetailLoading] = React.useState(mode === "edit")
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [serverVersion, setServerVersion] = React.useState<number | null>(null)
@@ -233,6 +319,14 @@ export function BudgetForm({
   const [serverTotal, setServerTotal] = React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [excelOpen, setExcelOpen] = React.useState(false)
+  const [excelBusy, setExcelBusy] = React.useState(false)
+  const [excelParseErrors, setExcelParseErrors] = React.useState<
+    BudgetExcelRowError[] | null
+  >(null)
+  const [excelParsedLines, setExcelParsedLines] = React.useState<
+    BudgetExcelFormLine[] | null
+  >(null)
+  const excelFileInputRef = React.useRef<HTMLInputElement>(null)
   const [removeIndex, setRemoveIndex] = React.useState<number | null>(null)
 
   const resolvedIdRef = React.useRef<string | undefined>(budgetId)
@@ -292,24 +386,172 @@ export function BudgetForm({
     serverStatus === BudgetStatus.DRAFT ||
     serverStatus === BudgetStatus.REJECTED
 
+  const subjectById = React.useMemo(() => {
+    const m = new Map<string, { code: string; name: string }>()
+    for (const s of subjects) {
+      m.set(s.id, { code: s.code, name: s.name })
+    }
+    return m
+  }, [subjects])
+
+  function triggerDownloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleExportBudgetExcel() {
+    setExcelBusy(true)
+    try {
+      const vals = form.getValues()
+      const exportLines = vals.lines.map((l) => ({
+        subjectId: l.subjectId,
+        amount: l.amount,
+        amountYtd: l.amountYtd?.trim() ? l.amountYtd.trim() : null,
+        remark: l.remark?.trim() ? l.remark.trim() : null,
+        departmentCode: l.departmentCode?.trim()
+          ? l.departmentCode.trim()
+          : null,
+        dimension1: l.dimension1?.trim() ? l.dimension1.trim() : null,
+        dimension2: l.dimension2?.trim() ? l.dimension2.trim() : null,
+      }))
+      const u8 = await writeBudgetLinesExcelBuffer(
+        exportLines,
+        subjectById,
+        tplLabels
+      )
+      const blob = new Blob([Uint8Array.from(u8)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const safe = vals.name.trim().replace(/[/\\?%*:|"<>]/g, "_") || "预算明细"
+      triggerDownloadBlob(blob, `${safe}_明细.xlsx`)
+      toast.success("已导出")
+    } catch {
+      toast.error("导出失败")
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
+  async function handleDownloadBudgetTemplate() {
+    setExcelBusy(true)
+    try {
+      const u8 = await buildEmptyBudgetTemplateBuffer(tplLabels)
+      const blob = new Blob([Uint8Array.from(u8)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      triggerDownloadBlob(blob, "预算明细导入模板.xlsx")
+      toast.success("已下载模板")
+    } catch {
+      toast.error("下载模板失败")
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
+  async function onExcelFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setExcelBusy(true)
+    setExcelParseErrors(null)
+    setExcelParsedLines(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const result = await readBudgetLinesFromExcelBuffer(
+        buf,
+        tplLabels,
+        subjects
+      )
+      if (!result.ok) {
+        setExcelParseErrors(result.errors)
+        toast.error("解析失败，请查看下方错误列表")
+        return
+      }
+      setExcelParsedLines(result.lines)
+      toast.success(`已解析 ${result.lines.length} 行，确认后可替换当前明细`)
+    } catch {
+      toast.error("读取文件失败")
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
+  function applyExcelParsedLines() {
+    if (!excelParsedLines?.length) return
+    form.setValue("lines", excelParsedLines)
+    toast.success("已用 Excel 替换当前明细，请保存草稿")
+    setExcelOpen(false)
+    setExcelParsedLines(null)
+    setExcelParseErrors(null)
+  }
+
+  function onExcelDialogOpenChange(open: boolean) {
+    setExcelOpen(open)
+    if (!open) {
+      setExcelParseErrors(null)
+      setExcelParsedLines(null)
+    }
+  }
+
   React.useEffect(() => {
     let cancelled = false
     ;(async () => {
       setSubjectsLoading(true)
       try {
-        const res = await fetch("/api/budget-subjects", {
-          headers: buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole),
-        })
-        const json = (await res.json()) as
+        const headers = buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole)
+        const [subRes, tplRes, depRes, d1Res, d2Res] = await Promise.all([
+          fetch("/api/budget-subjects", { headers }),
+          fetch("/api/settings/budget-template", { headers }),
+          fetch("/api/master-data/departments", { headers }),
+          fetch("/api/master-data/dimension-values?slot=1", { headers }),
+          fetch("/api/master-data/dimension-values?slot=2", { headers }),
+        ])
+        const [subJson, tplJson, depJson, d1Json, d2Json] = await Promise.all([
+          subRes.json(),
+          tplRes.json(),
+          depRes.json(),
+          d1Res.json(),
+          d2Res.json(),
+        ])
+        if (cancelled) return
+
+        const subParsed = subJson as
           | ApiSuccess<{ items: SubjectOption[] }>
           | ApiFail
-        if (cancelled) return
-        if (!json.success) {
-          toast.error(json.error?.message ?? "加载科目失败")
+        if (!subParsed.success) {
+          toast.error(subParsed.error?.message ?? "加载科目失败")
           setSubjects([])
-          return
+        } else {
+          setSubjects(subParsed.data.items)
         }
-        setSubjects(json.data.items)
+
+        const tplParsed = tplJson as ApiSuccess<{
+          departmentFieldLabel: string | null
+          dimension1Label: string | null
+          dimension2Label: string | null
+        }> | ApiFail
+        if (tplParsed.success) {
+          setTplLabels({
+            departmentFieldLabel: tplParsed.data.departmentFieldLabel,
+            dimension1Label: tplParsed.data.dimension1Label,
+            dimension2Label: tplParsed.data.dimension2Label,
+          })
+        }
+
+        const mapCodeName = (
+          json: unknown
+        ): CodeName[] => {
+          const j = json as ApiSuccess<{ items: { code: string; name: string }[] }> | ApiFail
+          if (!j.success) return []
+          return j.data.items.map((r) => ({ code: r.code, name: r.name }))
+        }
+        setDeptOptions(mapCodeName(depJson))
+        setDim1Options(mapCodeName(d1Json))
+        setDim2Options(mapCodeName(d2Json))
       } catch {
         if (!cancelled) toast.error("加载科目失败")
       } finally {
@@ -590,7 +832,16 @@ export function BudgetForm({
           <Button
             type="button"
             variant="outline"
-            disabled={!isEditable || saving}
+            disabled={subjectsLoading || excelBusy}
+            onClick={() => void handleExportBudgetExcel()}
+          >
+            <FileSpreadsheetIcon className="size-4" />
+            Excel 导出
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!isEditable || saving || subjectsLoading}
             onClick={() => setExcelOpen(true)}
           >
             <FileSpreadsheetIcon className="size-4" />
@@ -865,10 +1116,14 @@ export function BudgetForm({
                     <TableRow>
                       <TableHead className="min-w-[200px]">预算科目</TableHead>
                       <TableHead className="min-w-[120px]">
-                        部门编码
+                        {tplLabels.departmentFieldLabel?.trim() || "部门编码"}
                       </TableHead>
-                      <TableHead className="min-w-[120px]">维度1</TableHead>
-                      <TableHead className="min-w-[120px]">维度2</TableHead>
+                      <TableHead className="min-w-[120px]">
+                        {tplLabels.dimension1Label?.trim() || "维度1"}
+                      </TableHead>
+                      <TableHead className="min-w-[120px]">
+                        {tplLabels.dimension2Label?.trim() || "维度2"}
+                      </TableHead>
                       <TableHead className="min-w-[120px] text-right">
                         金额
                       </TableHead>
@@ -917,13 +1172,13 @@ export function BudgetForm({
                             name={`lines.${index}.departmentCode`}
                             render={({ field: f }) => (
                               <FormItem>
-                                <FormControl>
-                                  <Input
-                                    disabled={!isEditable}
-                                    placeholder="组织/部门"
-                                    {...f}
-                                  />
-                                </FormControl>
+                                <BudgetLineCodeSelect
+                                  options={deptOptions}
+                                  value={f.value ?? ""}
+                                  onChange={f.onChange}
+                                  disabled={!isEditable}
+                                  placeholder="选填"
+                                />
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -935,13 +1190,13 @@ export function BudgetForm({
                             name={`lines.${index}.dimension1`}
                             render={({ field: f }) => (
                               <FormItem>
-                                <FormControl>
-                                  <Input
-                                    disabled={!isEditable}
-                                    placeholder="维度1"
-                                    {...f}
-                                  />
-                                </FormControl>
+                                <BudgetLineCodeSelect
+                                  options={dim1Options}
+                                  value={f.value ?? ""}
+                                  onChange={f.onChange}
+                                  disabled={!isEditable}
+                                  placeholder="选填"
+                                />
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -953,13 +1208,13 @@ export function BudgetForm({
                             name={`lines.${index}.dimension2`}
                             render={({ field: f }) => (
                               <FormItem>
-                                <FormControl>
-                                  <Input
-                                    disabled={!isEditable}
-                                    placeholder="维度2"
-                                    {...f}
-                                  />
-                                </FormControl>
+                                <BudgetLineCodeSelect
+                                  options={dim2Options}
+                                  value={f.value ?? ""}
+                                  onChange={f.onChange}
+                                  disabled={!isEditable}
+                                  placeholder="选填"
+                                />
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -1085,17 +1340,88 @@ export function BudgetForm({
         </form>
       </Form>
 
-      <Dialog open={excelOpen} onOpenChange={setExcelOpen}>
-        <DialogContent>
+      <Dialog open={excelOpen} onOpenChange={onExcelDialogOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Excel 导入</DialogTitle>
             <DialogDescription>
-              该功能正在规划中：将支持下载模板、校验列映射并批量生成明细行。
+              首行为表头，须包含「科目编码」「金额」列；部门与维度列名可与预算模板中的列标题一致。导入将
+              <strong> 替换 </strong>
+              当前表格中的全部明细行（未保存可刷新页面放弃）。
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setExcelOpen(false)}>
-              知道了
+          <div className="grid gap-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={excelBusy}
+                onClick={() => void handleDownloadBudgetTemplate()}
+              >
+                下载空模板
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={excelBusy}
+                onClick={() => excelFileInputRef.current?.click()}
+              >
+                选择 Excel 文件
+              </Button>
+              <input
+                ref={excelFileInputRef}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(e) => void onExcelFileSelected(e)}
+              />
+            </div>
+            {excelBusy ? (
+              <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                <Loader2Icon className="size-4 animate-spin" />
+                处理中…
+              </p>
+            ) : null}
+            {excelParseErrors?.length ? (
+              <div className="space-y-2">
+                <p className="text-destructive text-sm font-medium">
+                  以下行无法导入，请修正后重试：
+                </p>
+                <ScrollArea className="h-40 rounded-md border p-2 text-sm">
+                  <ul className="space-y-1 pr-3">
+                    {excelParseErrors.map((err, i) => (
+                      <li key={`${err.excelRow}-${i}`}>
+                        {err.excelRow > 0 ? `第 ${err.excelRow} 行：` : ""}
+                        {err.message}
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              </div>
+            ) : null}
+            {excelParsedLines?.length ? (
+              <p className="text-muted-foreground text-sm">
+                已成功解析 {excelParsedLines.length}{" "}
+                行。点击下方按钮后，将覆盖当前表单中的明细。
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onExcelDialogOpenChange(false)}
+            >
+              关闭
+            </Button>
+            <Button
+              type="button"
+              disabled={!excelParsedLines?.length || excelBusy}
+              onClick={applyExcelParsedLines}
+            >
+              替换当前明细
             </Button>
           </DialogFooter>
         </DialogContent>

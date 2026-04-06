@@ -6,9 +6,10 @@ import {
   collectDescendantSubjectIds,
   propagateLevelsUnder,
 } from "@/lib/api/budget-subject-mutations"
-import { requireAuth } from "@/lib/api/request-auth"
+import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { fail, fromZodError, ok } from "@/lib/api/response"
+import { Permission } from "@/lib/auth/permissions"
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -23,7 +24,7 @@ async function subjectVisibleToOrg(id: string, organizationId: string) {
 
 export async function PUT(request: Request, ctx: RouteCtx) {
   try {
-    const authOr = await requireAuth(request)
+    const authOr = await requireApiPermission(request, Permission.SETTINGS_MANAGE)
     if (authOr instanceof Response) return authOr
     const auth = authOr
     const { id } = await ctx.params
@@ -125,7 +126,7 @@ export async function PUT(request: Request, ctx: RouteCtx) {
 
 export async function DELETE(request: Request, ctx: RouteCtx) {
   try {
-    const authOr = await requireAuth(request)
+    const authOr = await requireApiPermission(request, Permission.SETTINGS_MANAGE)
     if (authOr instanceof Response) return authOr
     const auth = authOr
     const { id } = await ctx.params

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
+  FileSpreadsheetIcon,
   Loader2Icon,
   PencilIcon,
   PlusIcon,
@@ -32,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Form,
   FormControl,
@@ -42,6 +44,13 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -58,6 +67,13 @@ import {
 } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
+import {
+  buildEmptyCashPlanTemplateBuffer,
+  readCashPlanLinesFromExcelBuffer,
+  writeCashPlanExcelBuffer,
+  type CashPlanExcelRowError,
+  type CashPlanLineImportDto,
+} from "@/lib/cash-plan/excel-cash-plan-lines"
 import { useBudgetStore } from "@/stores/budget-store"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
@@ -152,6 +168,73 @@ function toIsoDateEndOfDay(dateStr: string) {
   return `${dateStr}T23:59:59.999Z`
 }
 
+type CatOpt = { code: string; name: string }
+
+const CP_CAT_NONE = "__none__"
+const CP_CAT_ORPHAN = "__orphan__"
+
+function CashPlanCategorySelect({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options: CatOpt[]
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  if (options.length === 0) {
+    return (
+      <FormControl>
+        <Input placeholder="选填" disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)} />
+      </FormControl>
+    )
+  }
+  const trimmed = value ?? ""
+  const inList = Boolean(trimmed && options.some((o) => o.code === trimmed))
+  const selectValue =
+    !trimmed ? CP_CAT_NONE : inList ? trimmed : `${CP_CAT_ORPHAN}${trimmed}`
+
+  return (
+    <Select
+      disabled={disabled}
+      value={selectValue}
+      onValueChange={(v) => {
+        if (v === CP_CAT_NONE) onChange("")
+        else if (v.startsWith(CP_CAT_ORPHAN))
+          onChange(v.slice(CP_CAT_ORPHAN.length))
+        else onChange(v)
+      }}
+    >
+      <FormControl>
+        <SelectTrigger>
+          <SelectValue placeholder="选填" />
+        </SelectTrigger>
+      </FormControl>
+      <SelectContent>
+        <SelectItem value={CP_CAT_NONE}>（空）</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o.code} value={o.code}>
+            {o.code} · {o.name}
+          </SelectItem>
+        ))}
+        {!inList && trimmed ? (
+          <SelectItem value={`${CP_CAT_ORPHAN}${trimmed}`}>
+            未登记：{trimmed}
+          </SelectItem>
+        ) : null}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function categoryDisplay(code: string | null, map: Map<string, string>) {
+  if (!code) return "—"
+  const n = map.get(code)
+  return n ? `${n}（${code}）` : code
+}
+
 const lineFormSchema = z.object({
   category: z.string().max(128).optional(),
   amount: z
@@ -207,6 +290,33 @@ export function CashPlanDetailView() {
 
   const [basicSaving, setBasicSaving] = React.useState(false)
 
+  const [cashExcelOpen, setCashExcelOpen] = React.useState(false)
+  const [cashExcelBusy, setCashExcelBusy] = React.useState(false)
+  const [cashExcelErrors, setCashExcelErrors] = React.useState<
+    CashPlanExcelRowError[] | null
+  >(null)
+  const [cashExcelParsed, setCashExcelParsed] = React.useState<{
+    income: CashPlanLineImportDto[]
+    expense: CashPlanLineImportDto[]
+  } | null>(null)
+  const cashExcelFileRef = React.useRef<HTMLInputElement>(null)
+
+  const [incomeCategoryOpts, setIncomeCategoryOpts] = React.useState<CatOpt[]>(
+    []
+  )
+  const [expenseCategoryOpts, setExpenseCategoryOpts] = React.useState<CatOpt[]>(
+    []
+  )
+
+  const incomeCatMap = React.useMemo(
+    () => new Map(incomeCategoryOpts.map((o) => [o.code, o.name])),
+    [incomeCategoryOpts]
+  )
+  const expenseCatMap = React.useMemo(
+    () => new Map(expenseCategoryOpts.map((o) => [o.code, o.name])),
+    [expenseCategoryOpts]
+  )
+
   const basicForm = useForm<BasicFormValues>({
     resolver: zodResolver(basicFormSchema),
     defaultValues: { openingBalance: "", safetyWaterLevel: "" },
@@ -254,6 +364,42 @@ export function CashPlanDetailView() {
   React.useEffect(() => {
     void loadPlan()
   }, [loadPlan])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const headers = buildMockHeaders(mockOrgId, mockUserId, mockUserRole)
+    const mapOpts = (json: unknown): CatOpt[] => {
+      const j = json as
+        | ApiSuccess<{ items: { code: string; name: string }[] }>
+        | ApiFail
+      if (!j.success) return []
+      return j.data.items.map((r) => ({ code: r.code, name: r.name }))
+    }
+    ;(async () => {
+      try {
+        const [iRes, eRes] = await Promise.all([
+          fetch("/api/master-data/cash-plan-categories?kind=INCOME", {
+            headers,
+          }),
+          fetch("/api/master-data/cash-plan-categories?kind=EXPENSE", {
+            headers,
+          }),
+        ])
+        const [iJson, eJson] = await Promise.all([iRes.json(), eRes.json()])
+        if (cancelled) return
+        setIncomeCategoryOpts(mapOpts(iJson))
+        setExpenseCategoryOpts(mapOpts(eJson))
+      } catch {
+        if (!cancelled) {
+          setIncomeCategoryOpts([])
+          setExpenseCategoryOpts([])
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mockOrgId, mockUserId, mockUserRole])
 
   const loadForecast = React.useCallback(async () => {
     if (!id) return
@@ -391,6 +537,163 @@ export function CashPlanDetailView() {
     }
   })
 
+  function triggerDownloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleCashPlanExportExcel() {
+    if (!plan) return
+    setCashExcelBusy(true)
+    try {
+      const u8 = await writeCashPlanExcelBuffer(plan.incomes, plan.expenses)
+      const blob = new Blob([Uint8Array.from(u8)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const name =
+        plan.name?.trim().replace(/[/\\?%*:|"<>]/g, "_") || "资金计划"
+      triggerDownloadBlob(blob, `${name}_明细.xlsx`)
+      toast.success("已导出")
+    } catch {
+      toast.error("导出失败")
+    } finally {
+      setCashExcelBusy(false)
+    }
+  }
+
+  async function handleCashPlanTemplateDownload() {
+    setCashExcelBusy(true)
+    try {
+      const u8 = await buildEmptyCashPlanTemplateBuffer()
+      const blob = new Blob([Uint8Array.from(u8)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      triggerDownloadBlob(blob, "资金计划明细模板.xlsx")
+      toast.success("已下载模板")
+    } catch {
+      toast.error("下载模板失败")
+    } finally {
+      setCashExcelBusy(false)
+    }
+  }
+
+  async function onCashExcelFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setCashExcelBusy(true)
+    setCashExcelErrors(null)
+    setCashExcelParsed(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const result = await readCashPlanLinesFromExcelBuffer(buf)
+      if (!result.ok) {
+        setCashExcelErrors(result.errors)
+        toast.error("解析失败")
+        return
+      }
+      setCashExcelParsed({
+        income: result.income,
+        expense: result.expense,
+      })
+      toast.success(
+        `已解析：流入 ${result.income.length} 行，流出 ${result.expense.length} 行`
+      )
+    } catch {
+      toast.error("读取文件失败")
+    } finally {
+      setCashExcelBusy(false)
+    }
+  }
+
+  function onCashExcelDialogOpenChange(open: boolean) {
+    setCashExcelOpen(open)
+    if (!open) {
+      setCashExcelErrors(null)
+      setCashExcelParsed(null)
+    }
+  }
+
+  async function applyCashExcelImport() {
+    if (!id || !plan || !editable || !cashExcelParsed) return
+    setCashExcelBusy(true)
+    try {
+      const h = buildMockHeaders(mockOrgId, mockUserId, mockUserRole)
+      const hj = { ...h, "Content-Type": "application/json" }
+
+      for (const row of plan.incomes) {
+        const res = await fetch(`/api/cash-plan/${id}/income/${row.id}`, {
+          method: "DELETE",
+          headers: h,
+        })
+        const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+        if (!json.success) {
+          toast.error(json.error.message ?? "删除流入明细失败")
+          return
+        }
+      }
+      for (const row of plan.expenses) {
+        const res = await fetch(`/api/cash-plan/${id}/expense/${row.id}`, {
+          method: "DELETE",
+          headers: h,
+        })
+        const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+        if (!json.success) {
+          toast.error(json.error.message ?? "删除流出明细失败")
+          return
+        }
+      }
+
+      for (const line of cashExcelParsed.income) {
+        const res = await fetch(`/api/cash-plan/${id}/income`, {
+          method: "POST",
+          headers: hj,
+          body: JSON.stringify({
+            category: line.category,
+            amount: line.amount,
+            expectedDate: line.expectedDate,
+            remark: line.remark,
+          }),
+        })
+        const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+        if (!json.success) {
+          toast.error(json.error.message ?? "写入流入明细失败")
+          return
+        }
+      }
+      for (const line of cashExcelParsed.expense) {
+        const res = await fetch(`/api/cash-plan/${id}/expense`, {
+          method: "POST",
+          headers: hj,
+          body: JSON.stringify({
+            category: line.category,
+            amount: line.amount,
+            expectedDate: line.expectedDate,
+            remark: line.remark,
+          }),
+        })
+        const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+        if (!json.success) {
+          toast.error(json.error.message ?? "写入流出明细失败")
+          return
+        }
+      }
+
+      toast.success("已按 Excel 替换全部明细")
+      onCashExcelDialogOpenChange(false)
+      await loadPlan()
+      await loadForecast()
+    } catch {
+      toast.error("导入失败")
+    } finally {
+      setCashExcelBusy(false)
+    }
+  }
+
   async function deleteLine(kind: "income" | "expense", row: LineRow) {
     if (!id || !editable) return
     if (!window.confirm("确定删除该明细？")) return
@@ -489,20 +792,42 @@ export function CashPlanDetailView() {
             </p>
           ) : null}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void loadPlan()
-            void loadForecast()
-            void loadWarnings()
-          }}
-          disabled={loading}
-        >
-          <RefreshCwIcon className="mr-2 size-4" />
-          刷新
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void loadPlan()
+              void loadForecast()
+              void loadWarnings()
+            }}
+            disabled={loading}
+          >
+            <RefreshCwIcon className="mr-2 size-4" />
+            刷新
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!plan || cashExcelBusy}
+            onClick={() => void handleCashPlanExportExcel()}
+          >
+            <FileSpreadsheetIcon className="mr-2 size-4" />
+            Excel 导出
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!plan || !editable || cashExcelBusy}
+            onClick={() => setCashExcelOpen(true)}
+          >
+            <FileSpreadsheetIcon className="mr-2 size-4" />
+            Excel 导入
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -640,7 +965,9 @@ export function CashPlanDetailView() {
                     ) : (
                       plan.incomes.map((row) => (
                         <TableRow key={row.id}>
-                          <TableCell>{row.category ?? "—"}</TableCell>
+                          <TableCell>
+                            {categoryDisplay(row.category, incomeCatMap)}
+                          </TableCell>
                           <TableCell className="tabular-nums text-sm">
                             {isoDateOnly(row.expectedDate) || "—"}
                           </TableCell>
@@ -734,7 +1061,9 @@ export function CashPlanDetailView() {
                     ) : (
                       plan.expenses.map((row) => (
                         <TableRow key={row.id}>
-                          <TableCell>{row.category ?? "—"}</TableCell>
+                          <TableCell>
+                            {categoryDisplay(row.category, expenseCatMap)}
+                          </TableCell>
                           <TableCell className="tabular-nums text-sm">
                             {isoDateOnly(row.expectedDate) || "—"}
                           </TableCell>
@@ -1071,6 +1400,94 @@ export function CashPlanDetailView() {
         </Tabs>
       ) : null}
 
+      <Dialog open={cashExcelOpen} onOpenChange={onCashExcelDialogOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Excel 导入</DialogTitle>
+            <DialogDescription>
+              文件须含两个工作表：「流入」与「流出」，首行为表头（类别编码、金额、预计日期、备注）。导入将
+              <strong> 删除并重建 </strong>
+              两侧全部明细行。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={cashExcelBusy}
+                onClick={() => void handleCashPlanTemplateDownload()}
+              >
+                下载空模板
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={cashExcelBusy}
+                onClick={() => cashExcelFileRef.current?.click()}
+              >
+                选择 Excel 文件
+              </Button>
+              <input
+                ref={cashExcelFileRef}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(e) => void onCashExcelFileSelected(e)}
+              />
+            </div>
+            {cashExcelBusy ? (
+              <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                <Loader2Icon className="size-4 animate-spin" />
+                处理中…
+              </p>
+            ) : null}
+            {cashExcelErrors?.length ? (
+              <div className="space-y-2">
+                <p className="text-destructive text-sm font-medium">
+                  解析错误：
+                </p>
+                <ScrollArea className="h-40 rounded-md border p-2 text-sm">
+                  <ul className="space-y-1 pr-3">
+                    {cashExcelErrors.map((err, i) => (
+                      <li key={`${err.sheet}-${err.excelRow}-${i}`}>
+                        {err.sheet ? `【${err.sheet}】` : ""}
+                        {err.excelRow > 0 ? `第 ${err.excelRow} 行：` : ""}
+                        {err.message}
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              </div>
+            ) : null}
+            {cashExcelParsed ? (
+              <p className="text-muted-foreground text-sm">
+                流入 {cashExcelParsed.income.length} 行，流出{" "}
+                {cashExcelParsed.expense.length} 行。确认后将覆盖服务器上的明细。
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onCashExcelDialogOpenChange(false)}
+            >
+              关闭
+            </Button>
+            <Button
+              type="button"
+              disabled={cashExcelParsed === null || cashExcelBusy}
+              onClick={() => void applyCashExcelImport()}
+            >
+              替换全部明细
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={lineDialog !== null}
         onOpenChange={(o) => {
@@ -1093,9 +1510,16 @@ export function CashPlanDetailView() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>类别</FormLabel>
-                    <FormControl>
-                      <Input placeholder="选填" {...field} />
-                    </FormControl>
+                    <CashPlanCategorySelect
+                      options={
+                        lineDialog?.kind === "income"
+                          ? incomeCategoryOpts
+                          : expenseCategoryOpts
+                      }
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      disabled={!editable}
+                    />
                     <FormMessage />
                   </FormItem>
                 )}

@@ -180,8 +180,10 @@ export default function BudgetListPage() {
 
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>无法加载预算列表</AlertTitle>
+          <AlertDescription className="whitespace-pre-wrap">
+            {error}
+          </AlertDescription>
         </Alert>
       ) : null}
 

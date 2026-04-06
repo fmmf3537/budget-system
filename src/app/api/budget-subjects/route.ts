@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma"
 import { budgetSubjectCreateSchema } from "@/lib/api/budget-subject-schemas"
 import { requireAuth } from "@/lib/api/request-auth"
+import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { created, fail, fromZodError, ok } from "@/lib/api/response"
+import { Permission } from "@/lib/auth/permissions"
 
 function subjectInOrgScope(id: string, organizationId: string) {
   return prisma.budgetSubject.findFirst({
@@ -15,11 +17,14 @@ function subjectInOrgScope(id: string, organizationId: string) {
 
 export async function GET(request: Request) {
   try {
-    const authOr = await requireAuth(request)
-    if (authOr instanceof Response) return authOr
-    const auth = authOr
     const { searchParams } = new URL(request.url)
     const manage = searchParams.get("manage") === "1"
+
+    const authOr = manage
+      ? await requireApiPermission(request, Permission.SETTINGS_MANAGE)
+      : await requireAuth(request)
+    if (authOr instanceof Response) return authOr
+    const auth = authOr
 
     const items = await prisma.budgetSubject.findMany({
       where: {
@@ -53,7 +58,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const authOr = await requireAuth(request)
+    const authOr = await requireApiPermission(request, Permission.SETTINGS_MANAGE)
     if (authOr instanceof Response) return authOr
     const auth = authOr
 

@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "budget_header_organizationId_fiscalYear_compilationGranularity_" RENAME TO "budget_header_organizationId_fiscalYear_compilationGranular_idx";

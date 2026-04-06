@@ -16,10 +16,19 @@ export function handleRouteError(e: unknown): NextResponse {
         return fail("BAD_REFERENCE", "关联数据不存在或无法删除", 400)
       case "P2025":
         return fail("NOT_FOUND", "记录不存在", 404)
+      case "P2022":
+        return fail(
+          "DATABASE_SCHEMA",
+          "数据库表结构与当前应用不一致（例如缺少新列）。请在部署环境执行 npx prisma migrate deploy，本地可执行 npx prisma migrate dev；然后重新运行 npx prisma generate。",
+          503,
+          process.env.NODE_ENV === "development"
+            ? { code: e.code, meta: e.meta }
+            : undefined
+        )
       default:
         return fail(
           "DATABASE_ERROR",
-          "数据库操作失败",
+          "数据库操作失败。若刚更新过代码，请确认已执行 npx prisma migrate deploy 且数据库可连接。",
           400,
           process.env.NODE_ENV === "development" ? { code: e.code, meta: e.meta } : undefined
         )
