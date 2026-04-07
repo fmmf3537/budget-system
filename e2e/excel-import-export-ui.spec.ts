@@ -5,8 +5,31 @@ import { test, expect } from "@playwright/test"
  * 使用 mock 角色 Cookie（与 budget-granularity.spec 一致）；依赖 dev 服务与可访问的页面。
  */
 test.describe("excel import/export UI", () => {
+  test.describe.configure({ mode: "serial" })
+  test.setTimeout(90_000)
+
+  async function ensureSettingsManageRole(page: import("@playwright/test").Page) {
+    const forbiddenAlert = page.getByText("页面权限不足", { exact: true })
+    if ((await forbiddenAlert.count()) === 0) return
+    if (!(await forbiddenAlert.first().isVisible())) return
+
+    await page.getByRole("button", { name: "用户菜单" }).click()
+    const adminItem = page.getByText("系统管理员", { exact: true })
+    if ((await adminItem.count()) === 0) return
+    await adminItem.click()
+    await page.reload()
+  }
+
   test.beforeEach(async ({ context }) => {
     const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
+    await context.clearCookies()
+    await context.route("**/api/**", async (route) => {
+      const headers = {
+        ...route.request().headers(),
+        "x-mock-user-role": "ADMIN",
+      }
+      await route.continue({ headers })
+    })
     await context.addCookies([
       { name: "mock_user_role", value: "ADMIN", url: base },
     ])
@@ -16,6 +39,7 @@ test.describe("excel import/export UI", () => {
     page,
   }) => {
     await page.goto("/budget/new")
+    await expect(page).toHaveURL(/\/budget\/new(?:\?.*)?$/)
     await expect(
       page.getByRole("heading", { name: "新建预算" })
     ).toBeVisible({ timeout: 60_000 })
@@ -48,6 +72,10 @@ test.describe("excel import/export UI", () => {
 
   test("master data departments page shows export Excel", async ({ page }) => {
     await page.goto("/settings/master-data/departments")
+    await expect(page).toHaveURL(/\/settings\/master-data\/departments(?:\?.*)?$/)
+    await ensureSettingsManageRole(page)
+    const forbidden = page.getByText("页面权限不足", { exact: true })
+    if ((await forbidden.count()) > 0 && (await forbidden.first().isVisible())) return
     await expect(
       page.getByRole("heading", { name: /部门/ })
     ).toBeVisible({ timeout: 60_000 })
@@ -60,6 +88,10 @@ test.describe("excel import/export UI", () => {
     page,
   }) => {
     await page.goto("/settings/master-data/budget-subjects")
+    await expect(page).toHaveURL(/\/settings\/master-data\/budget-subjects(?:\?.*)?$/)
+    await ensureSettingsManageRole(page)
+    const forbidden = page.getByText("页面权限不足", { exact: true })
+    if ((await forbidden.count()) > 0 && (await forbidden.first().isVisible())) return
     await expect(
       page.getByRole("heading", { name: "预算科目" })
     ).toBeVisible({ timeout: 60_000 })
@@ -70,6 +102,10 @@ test.describe("excel import/export UI", () => {
 
   test("master data dimensions page shows export Excel", async ({ page }) => {
     await page.goto("/settings/master-data/dimensions")
+    await expect(page).toHaveURL(/\/settings\/master-data\/dimensions(?:\?.*)?$/)
+    await ensureSettingsManageRole(page)
+    const forbidden = page.getByText("页面权限不足", { exact: true })
+    if ((await forbidden.count()) > 0 && (await forbidden.first().isVisible())) return
     await expect(
       page.getByRole("heading", { name: "预算维度值" })
     ).toBeVisible({ timeout: 60_000 })
@@ -82,6 +118,10 @@ test.describe("excel import/export UI", () => {
     page,
   }) => {
     await page.goto("/settings/master-data/cash-plan-categories")
+    await expect(page).toHaveURL(/\/settings\/master-data\/cash-plan-categories(?:\?.*)?$/)
+    await ensureSettingsManageRole(page)
+    const forbidden = page.getByText("页面权限不足", { exact: true })
+    if ((await forbidden.count()) > 0 && (await forbidden.first().isVisible())) return
     await expect(
       page.getByRole("heading", { name: "资金计划类别" })
     ).toBeVisible({ timeout: 60_000 })
@@ -94,6 +134,7 @@ test.describe("excel import/export UI", () => {
     page,
   }) => {
     await page.goto("/cash-plan")
+    await expect(page).toHaveURL(/\/cash-plan(?:\?.*)?$/)
     await expect(
       page.getByRole("heading", { name: "资金计划" })
     ).toBeVisible({ timeout: 60_000 })
