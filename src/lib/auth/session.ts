@@ -3,6 +3,36 @@ import * as jose from "jose"
 /** HttpOnly 会话 Cookie 名 */
 export const SESSION_COOKIE_NAME = "bs_session"
 
+/**
+ * 传给 `NextResponse.cookies.set` 的会话 Cookie 选项（不含 `name` / `value`）。
+ * 开发环境 `secure: false` 以便在 http://localhost 下调试；生产环境 `secure: true`。
+ * 可用 `COOKIE_SECURE=true|false` 显式覆盖（例如本地模拟生产 Cookie 行为）。
+ */
+export type SessionCookieSetOptions = {
+  httpOnly: true
+  sameSite: "lax"
+  path: "/"
+  secure: boolean
+  maxAge: number
+}
+
+function sessionCookieSecure(): boolean {
+  const flag = process.env.COOKIE_SECURE
+  if (flag === "true") return true
+  if (flag === "false") return false
+  return process.env.NODE_ENV === "production"
+}
+
+export function getSessionCookieOptions(maxAge: number): SessionCookieSetOptions {
+  return {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: sessionCookieSecure(),
+    maxAge,
+  }
+}
+
 export type SessionJwtClaims = {
   sub: string
   oid: string

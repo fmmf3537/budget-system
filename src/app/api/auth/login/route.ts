@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/prisma"
 import { fail } from "@/lib/api/response"
 import { verifyPassword } from "@/lib/auth/password"
-import { createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session"
+import {
+  createSessionToken,
+  getSessionCookieOptions,
+  SESSION_COOKIE_NAME,
+} from "@/lib/auth/session"
 import { normalizeRole } from "@/lib/auth/roles"
 import { UserStatus } from "@/generated/prisma/enums"
 import { NextResponse } from "next/server"
@@ -66,12 +70,11 @@ export async function POST(request: Request) {
     error: null,
   })
 
-  res.cookies.set(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  })
+  res.cookies.set(
+    SESSION_COOKIE_NAME,
+    token,
+    getSessionCookieOptions(60 * 60 * 24 * 7)
+  )
 
   return res
 }

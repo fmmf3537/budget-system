@@ -19,6 +19,9 @@ export const metadata: Metadata = {
   description: "预算编制、审批、调整与资金计划",
 }
 
+/** Avoid Vercel build error "Unable to find lambda for route" (Next 16 + static prerender vs trace map). */
+export const dynamic = "force-dynamic"
+
 export default function RootLayout({
   children,
 }: Readonly<{
