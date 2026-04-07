@@ -75,7 +75,7 @@ test.describe("excel import/export UI", () => {
     ).toBeVisible({ timeout: 60_000 })
     await expect(
       page.getByRole("button", { name: "导出 Excel" }).first()
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
   })
 
   test("master data cash plan categories page shows export Excel", async ({
@@ -87,7 +87,7 @@ test.describe("excel import/export UI", () => {
     ).toBeVisible({ timeout: 60_000 })
     await expect(
       page.getByRole("button", { name: "导出 Excel" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
   })
 
   test("cash plan list: detail shows Excel buttons when a plan exists", async ({

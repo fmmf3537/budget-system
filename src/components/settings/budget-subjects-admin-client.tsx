@@ -100,7 +100,10 @@ export function BudgetSubjectsAdminClient() {
   const [eSort, setESort] = React.useState("0")
   const [eActive, setEActive] = React.useState(true)
 
+  const loadIdRef = React.useRef(0)
+
   async function load() {
+    const requestId = ++loadIdRef.current
     setLoading(true)
     setForbidden(false)
     try {
@@ -108,7 +111,9 @@ export function BudgetSubjectsAdminClient() {
         credentials: "include",
         headers: baseHeaders,
       })
+      if (requestId !== loadIdRef.current) return
       const json = (await res.json()) as ApiSuccess<{ items: SubjectRow[] }> | ApiFail
+      if (requestId !== loadIdRef.current) return
       if (!json.success) {
         if (res.status === 403) {
           setForbidden(true)
@@ -121,10 +126,13 @@ export function BudgetSubjectsAdminClient() {
       }
       setItems(json.data.items)
     } catch {
+      if (requestId !== loadIdRef.current) return
       toast.error("加载科目失败")
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestId === loadIdRef.current) {
+        setLoading(false)
+      }
     }
   }
 

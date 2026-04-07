@@ -83,7 +83,10 @@ function KindPanel({ kind }: { kind: CashPlanCategoryKind }) {
   const kindLabel =
     kind === CashPlanCategoryKind.INCOME ? "流入" : "流出"
 
+  const loadIdRef = React.useRef(0)
+
   async function load() {
+    const requestId = ++loadIdRef.current
     setLoading(true)
     setForbidden(false)
     try {
@@ -91,7 +94,9 @@ function KindPanel({ kind }: { kind: CashPlanCategoryKind }) {
         `/api/master-data/cash-plan-categories?manage=1&kind=${kind}`,
         { credentials: "include", headers: baseHeaders }
       )
+      if (requestId !== loadIdRef.current) return
       const json = (await res.json()) as ApiSuccess<{ items: Row[] }> | ApiFail
+      if (requestId !== loadIdRef.current) return
       if (!json.success) {
         if (res.status === 403) {
           setForbidden(true)
@@ -104,10 +109,13 @@ function KindPanel({ kind }: { kind: CashPlanCategoryKind }) {
       }
       setItems(json.data.items)
     } catch {
+      if (requestId !== loadIdRef.current) return
       toast.error("加载失败")
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestId === loadIdRef.current) {
+        setLoading(false)
+      }
     }
   }
 

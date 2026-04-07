@@ -80,7 +80,10 @@ function DimensionSlotPanel({ slot }: { slot: 1 | 2 }) {
   const [eSort, setESort] = React.useState("0")
   const [eActive, setEActive] = React.useState(true)
 
+  const loadIdRef = React.useRef(0)
+
   async function load() {
+    const requestId = ++loadIdRef.current
     setLoading(true)
     setForbidden(false)
     try {
@@ -88,7 +91,9 @@ function DimensionSlotPanel({ slot }: { slot: 1 | 2 }) {
         `/api/master-data/dimension-values?manage=1&slot=${slot}`,
         { credentials: "include", headers: baseHeaders }
       )
+      if (requestId !== loadIdRef.current) return
       const json = (await res.json()) as ApiSuccess<{ items: Row[] }> | ApiFail
+      if (requestId !== loadIdRef.current) return
       if (!json.success) {
         if (res.status === 403) {
           setForbidden(true)
@@ -101,10 +106,13 @@ function DimensionSlotPanel({ slot }: { slot: 1 | 2 }) {
       }
       setItems(json.data.items)
     } catch {
+      if (requestId !== loadIdRef.current) return
       toast.error("加载失败")
       setItems([])
     } finally {
-      setLoading(false)
+      if (requestId === loadIdRef.current) {
+        setLoading(false)
+      }
     }
   }
 
