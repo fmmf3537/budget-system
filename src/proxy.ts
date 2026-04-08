@@ -19,7 +19,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
-  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value
+  const raw = request.cookies.get(SESSION_COOKIE_NAME)?.value
+  const token = raw?.trim() ? raw.trim() : null
   const claims = token ? await verifySessionToken(token) : null
   const authenticated = Boolean(claims)
 

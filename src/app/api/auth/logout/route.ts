@@ -1,7 +1,5 @@
-import { ok } from "@/lib/api/response"
 import {
-  getSessionCookieOptions,
-  SESSION_COOKIE_NAME,
+  clearSessionCookieOnResponse,
 } from "@/lib/auth/session"
 import { NextResponse } from "next/server"
 
@@ -11,6 +9,6 @@ export async function POST() {
     data: { ok: true },
     error: null,
   })
-  res.cookies.set(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0))
+  clearSessionCookieOnResponse(res)
   return res
 }
