@@ -285,5 +285,69 @@ export async function writeCashPlanExcelBuffer(
 }
 
 export async function buildEmptyCashPlanTemplateBuffer(): Promise<Uint8Array> {
-  return writeCashPlanExcelBuffer([], [])
+  const sampleIncome: CashPlanLineExportRow[] = [
+    {
+      category: "IN_SALES",
+      amount: "120000",
+      expectedDate: "2026-01-05T23:59:59.999Z",
+      remark: "客户A货款回款",
+    },
+    {
+      category: "IN_SERVICE",
+      amount: "45000",
+      expectedDate: "2026-01-10T23:59:59.999Z",
+      remark: "技术服务费",
+    },
+    {
+      category: "IN_REFUND",
+      amount: "8000",
+      expectedDate: "2026-01-15T23:59:59.999Z",
+      remark: "押金退回",
+    },
+    {
+      category: "IN_LOAN",
+      amount: "50000",
+      expectedDate: "2026-01-20T23:59:59.999Z",
+      remark: "短期借款到账（示例）",
+    },
+    {
+      category: "IN_OTHER",
+      amount: "6000",
+      expectedDate: "2026-01-28T23:59:59.999Z",
+      remark: "其他经营性流入",
+    },
+  ]
+  const sampleExpense: CashPlanLineExportRow[] = [
+    {
+      category: "OUT_PAYROLL",
+      amount: "70000",
+      expectedDate: "2026-01-08T23:59:59.999Z",
+      remark: "月度工资发放",
+    },
+    {
+      category: "OUT_RENT",
+      amount: "20000",
+      expectedDate: "2026-01-12T23:59:59.999Z",
+      remark: "办公场地租金",
+    },
+    {
+      category: "OUT_TAX",
+      amount: "15000",
+      expectedDate: "2026-01-18T23:59:59.999Z",
+      remark: "税费缴纳",
+    },
+    {
+      category: "OUT_PROCURE",
+      amount: "32000",
+      expectedDate: "2026-01-22T23:59:59.999Z",
+      remark: "物料采购款",
+    },
+    {
+      category: "OUT_MARKETING",
+      amount: "12000",
+      expectedDate: "2026-01-26T23:59:59.999Z",
+      remark: "市场推广费用",
+    },
+  ]
+  return writeCashPlanExcelBuffer(sampleIncome, sampleExpense)
 }

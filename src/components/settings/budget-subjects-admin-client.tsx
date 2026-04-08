@@ -8,12 +8,13 @@ import {
   PencilIcon,
   PlusIcon,
   Trash2Icon,
+  UploadIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { buildMockHeaders } from "@/lib/api/mock-headers"
 import { downloadXlsxUint8 } from "@/lib/excel/download-xlsx"
-import { writeSimpleExcelBuffer } from "@/lib/excel/simple-sheet"
+import { readSimpleExcelBuffer, writeSimpleExcelBuffer } from "@/lib/excel/simple-sheet"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -87,7 +88,10 @@ export function BudgetSubjectsAdminClient() {
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editRow, setEditRow] = React.useState<SubjectRow | null>(null)
   const [deleteRow, setDeleteRow] = React.useState<SubjectRow | null>(null)
+  const [importOpen, setImportOpen] = React.useState(false)
+  const [importing, setImporting] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   const [cCode, setCCode] = React.useState("")
   const [cName, setCName] = React.useState("")
@@ -173,6 +177,104 @@ export function BudgetSubjectsAdminClient() {
       toast.success("已导出")
     } catch {
       toast.error("导出失败")
+    }
+  }
+
+  async function downloadTemplate() {
+    try {
+      const u8 = await writeSimpleExcelBuffer([
+        {
+          name: "预算科目",
+          headers: ["编码", "名称", "上级科目编码", "排序", "状态"],
+          rows: [
+            ["600100", "管理费用", "", 10, "启用"],
+            ["600101", "办公费", "600100", 20, "启用"],
+            ["600102", "差旅费", "600100", 30, "启用"],
+            ["600200", "销售费用", "", 40, "启用"],
+            ["600201", "市场推广费", "600200", 50, "停用"],
+          ],
+        },
+      ])
+      downloadXlsxUint8(u8, "预算科目_导入模板.xlsx")
+      toast.success("模板已下载")
+    } catch {
+      toast.error("模板下载失败")
+    }
+  }
+
+  async function onImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setImporting(true)
+    try {
+      const sheets = await readSimpleExcelBuffer(await file.arrayBuffer())
+      const first = sheets[0]
+      if (!first) return
+      const codeIdx = first.headers.findIndex((h) => h === "编码")
+      const nameIdx = first.headers.findIndex((h) => h === "名称")
+      const parentCodeIdx = first.headers.findIndex((h) => h === "上级科目编码")
+      const sortIdx = first.headers.findIndex((h) => h === "排序")
+      const statusIdx = first.headers.findIndex((h) => h === "状态")
+      if (codeIdx < 0 || nameIdx < 0) {
+        toast.error("模板不匹配：缺少「编码/名称」列")
+        return
+      }
+      const byCode = new Map(items.map((x) => [x.code, x]))
+      let createdCount = 0
+      let updatedCount = 0
+      for (const row of first.rows) {
+        const code = (row[codeIdx] ?? "").trim()
+        const name = (row[nameIdx] ?? "").trim()
+        if (!code || !name) continue
+        const parentCode = parentCodeIdx >= 0 ? (row[parentCodeIdx] ?? "").trim() : ""
+        const parentId = parentCode ? byCode.get(parentCode)?.id ?? null : null
+        if (parentCode && !parentId) {
+          throw new Error(`上级科目编码不存在：${parentCode}`)
+        }
+        const sortOrder =
+          sortIdx >= 0 ? Number.parseInt((row[sortIdx] ?? "").trim(), 10) || 0 : 0
+        const isActive = statusIdx >= 0 ? (row[statusIdx] ?? "").trim() !== "停用" : true
+        const old = byCode.get(code)
+        if (old) {
+          const res = await fetch(`/api/budget-subjects/${old.id}`, {
+            method: "PUT",
+            credentials: "include",
+            headers: { ...baseHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ code, name, parentId, sortOrder, isActive }),
+          })
+          const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          updatedCount += 1
+        } else {
+          const res = await fetch("/api/budget-subjects", {
+            method: "POST",
+            credentials: "include",
+            headers: { ...baseHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ code, name, parentId, sortOrder }),
+          })
+          const json = (await res.json()) as ApiSuccess<{ id: string }> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          createdCount += 1
+          byCode.set(code, {
+            id: json.data.id,
+            code,
+            name,
+            parentId,
+            level: null,
+            sortOrder,
+            isActive,
+            organizationId: "imported",
+          })
+        }
+      }
+      await load()
+      setImportOpen(false)
+      toast.success(`导入完成：新增 ${createdCount}，更新 ${updatedCount}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "导入失败")
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -320,6 +422,10 @@ export function BudgetSubjectsAdminClient() {
         >
           <DownloadIcon className="mr-2 size-4" />
           导出 Excel
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+          <UploadIcon className="mr-2 size-4" />
+          导入 Excel
         </Button>
         <Button onClick={openCreate}>
           <PlusIcon className="mr-2 size-4" />
@@ -588,6 +694,35 @@ export function BudgetSubjectsAdminClient() {
                 "删除"
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>导入预算科目</DialogTitle>
+            <DialogDescription>请先下载模板并填写，再上传。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button type="button" variant="outline" onClick={() => void downloadTemplate()}>
+              下载模板
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setImportOpen(false)}>
+                取消
+              </Button>
+              <Button type="button" disabled={importing} onClick={() => fileInputRef.current?.click()}>
+                {importing ? <Loader2Icon className="size-4 animate-spin" /> : "选择并导入"}
+              </Button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => void onImportFileSelected(e)}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

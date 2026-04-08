@@ -368,5 +368,59 @@ export async function writeBudgetLinesExcelBuffer(
 export async function buildEmptyBudgetTemplateBuffer(
   labels: BudgetExcelTemplateLabels
 ): Promise<Uint8Array> {
-  return writeBudgetLinesExcelBuffer([], new Map(), labels)
+  const sampleSubjectById = new Map<string, { code: string; name: string }>([
+    ["sample-1", { code: "600101", name: "办公费" }],
+    ["sample-2", { code: "600102", name: "差旅费" }],
+    ["sample-3", { code: "600103", name: "市场推广费" }],
+    ["sample-4", { code: "600104", name: "系统服务费" }],
+    ["sample-5", { code: "600105", name: "培训费" }],
+  ])
+  const sampleLines: BudgetExcelExportLine[] = [
+    {
+      subjectId: "sample-1",
+      amount: "12000",
+      amountYtd: "3000",
+      remark: "总部月度办公用品",
+      departmentCode: "D001",
+      dimension1: "项目A",
+      dimension2: "成本中心01",
+    },
+    {
+      subjectId: "sample-2",
+      amount: "25000",
+      amountYtd: "8000",
+      remark: "销售出差交通与住宿",
+      departmentCode: "D002",
+      dimension1: "华北区域",
+      dimension2: "成本中心02",
+    },
+    {
+      subjectId: "sample-3",
+      amount: "68000",
+      amountYtd: "12000",
+      remark: "线上投放预算",
+      departmentCode: "D003",
+      dimension1: "电商渠道",
+      dimension2: "成本中心03",
+    },
+    {
+      subjectId: "sample-4",
+      amount: "15000",
+      amountYtd: "",
+      remark: "预算系统年服务费（示例）",
+      departmentCode: "D001",
+      dimension1: "信息化",
+      dimension2: "成本中心01",
+    },
+    {
+      subjectId: "sample-5",
+      amount: "9000",
+      amountYtd: "2000",
+      remark: "管理层专项培训",
+      departmentCode: "D004",
+      dimension1: "人力资源",
+      dimension2: "成本中心04",
+    },
+  ]
+  return writeBudgetLinesExcelBuffer(sampleLines, sampleSubjectById, labels)
 }

@@ -5,10 +5,12 @@ import Link from "next/link"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  DownloadIcon,
   Loader2Icon,
   PencilIcon,
   PlusIcon,
   Trash2Icon,
+  UploadIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -49,6 +51,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
+import { downloadXlsxUint8 } from "@/lib/excel/download-xlsx"
+import { readSimpleExcelBuffer, writeSimpleExcelBuffer } from "@/lib/excel/simple-sheet"
 import { useBudgetStore } from "@/stores/budget-store"
 
 const BIZ_LABEL: Record<string, string> = {
@@ -165,6 +169,8 @@ export default function ApprovalFlowSettingsPage() {
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [detailLoading, setDetailLoading] = React.useState(false)
+  const [importOpen, setImportOpen] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   const [pName, setPName] = React.useState("")
   const [pBiz, setPBiz] = React.useState<string>(ApprovalBizType.BUDGET)
@@ -324,6 +330,211 @@ export default function ApprovalFlowSettingsPage() {
     }
   }
 
+  async function exportExcel() {
+    try {
+      const rows: (string | number)[][] = []
+      for (const p of items) {
+        const res = await fetch(`/api/approval/${p.id}`, {
+          headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+        })
+        const json = (await res.json()) as ApiSuccess<ProcessDetail> | ApiFail
+        if (!json.success) throw new Error(json.error.message)
+        const nodes = [...json.data.nodes].sort((a, b) => a.sortOrder - b.sortOrder)
+        if (nodes.length === 0) {
+          rows.push([p.name, p.bizType, p.isActive ? "启用" : "停用", 1, "", "", "", "", ""])
+        } else {
+          for (const n of nodes) {
+            rows.push([
+              p.name,
+              p.bizType,
+              p.isActive ? "启用" : "停用",
+              n.sortOrder + 1,
+              n.name,
+              n.approverUserId ?? "",
+              n.approverRole ?? "",
+              n.minTotalAmount ?? "",
+              n.maxTotalAmount ?? "",
+            ])
+          }
+        }
+      }
+      const u8 = await writeSimpleExcelBuffer([
+        {
+          name: "审批流程",
+          headers: [
+            "流程名称",
+            "业务类型",
+            "流程状态",
+            "节点序号",
+            "节点名称",
+            "审批人ID",
+            "角色规则",
+            "金额下限",
+            "金额上限",
+          ],
+          rows,
+        },
+      ])
+      downloadXlsxUint8(u8, "审批流程_导出.xlsx")
+      toast.success("已导出")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "导出失败")
+    }
+  }
+
+  async function downloadTemplate() {
+    try {
+      const u8 = await writeSimpleExcelBuffer([
+        {
+          name: "审批流程",
+          headers: [
+            "流程名称",
+            "业务类型",
+            "流程状态",
+            "节点序号",
+            "节点名称",
+            "审批人ID",
+            "角色规则",
+            "金额下限",
+            "金额上限",
+          ],
+          rows: [
+            ["预算审批标准流", "BUDGET", "启用", 1, "部门负责人审批", "", "DEPT_HEAD", "", "100000"],
+            ["预算审批标准流", "BUDGET", "启用", 2, "财务负责人审批", "", "FINANCE_MANAGER", "100000", ""],
+            ["资金计划审批流", "CASH_PLAN", "启用", 1, "资金主管审批", "", "CASH_MANAGER", "", ""],
+            ["预算调整审批流", "BUDGET_ADJUSTMENT", "停用", 1, "预算管理员审批", "", "BUDGET_MANAGER", "", ""],
+            ["其他事项审批流", "OTHER", "启用", 1, "管理员审批", "", "ADMIN", "", ""],
+          ],
+        },
+      ])
+      downloadXlsxUint8(u8, "审批流程_导入模板.xlsx")
+      toast.success("模板已下载")
+    } catch {
+      toast.error("模板下载失败")
+    }
+  }
+
+  async function onImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setSaving(true)
+    try {
+      const sheets = await readSimpleExcelBuffer(await file.arrayBuffer())
+      const first = sheets[0]
+      if (!first) return
+      const nameIdx = first.headers.findIndex((h) => h === "流程名称")
+      const bizIdx = first.headers.findIndex((h) => h === "业务类型")
+      const activeIdx = first.headers.findIndex((h) => h === "流程状态")
+      const orderIdx = first.headers.findIndex((h) => h === "节点序号")
+      const nodeNameIdx = first.headers.findIndex((h) => h === "节点名称")
+      const approverIdx = first.headers.findIndex((h) => h === "审批人ID")
+      const roleIdx = first.headers.findIndex((h) => h === "角色规则")
+      const minIdx = first.headers.findIndex((h) => h === "金额下限")
+      const maxIdx = first.headers.findIndex((h) => h === "金额上限")
+      if (nameIdx < 0 || bizIdx < 0 || nodeNameIdx < 0) {
+        toast.error("模板不匹配：缺少关键列")
+        return
+      }
+
+      const grouped = new Map<
+        string,
+        {
+          name: string
+          bizType: string
+          isActive: boolean
+          nodes: NodeForm[]
+        }
+      >()
+      for (const row of first.rows) {
+        const name = (row[nameIdx] ?? "").trim()
+        const bizType = (row[bizIdx] ?? "").trim()
+        const nodeName = (row[nodeNameIdx] ?? "").trim()
+        if (!name || !bizType || !nodeName) continue
+        const key = `${name}__${bizType}`
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            name,
+            bizType,
+            isActive: activeIdx >= 0 ? (row[activeIdx] ?? "").trim() !== "停用" : true,
+            nodes: [],
+          })
+        }
+        grouped.get(key)!.nodes.push({
+          clientKey: newKey(),
+          sortOrder:
+            orderIdx >= 0 ? Math.max(0, Number.parseInt((row[orderIdx] ?? "").trim(), 10) - 1 || 0) : grouped.get(key)!.nodes.length,
+          name: nodeName,
+          approverUserId: approverIdx >= 0 ? (row[approverIdx] ?? "").trim() || null : null,
+          approverRole: roleIdx >= 0 ? (row[roleIdx] ?? "").trim() : "",
+          isParallelGroup: false,
+          minTotalAmount: minIdx >= 0 ? (row[minIdx] ?? "").trim() : "",
+          maxTotalAmount: maxIdx >= 0 ? (row[maxIdx] ?? "").trim() : "",
+        })
+      }
+
+      const existing = new Map(items.map((x) => [`${x.name}__${x.bizType}`, x]))
+      let createdCount = 0
+      let updatedCount = 0
+      for (const [k, p] of grouped) {
+        const sortedNodes = [...p.nodes].sort((a, b) => a.sortOrder - b.sortOrder)
+        const old = existing.get(k)
+        if (old) {
+          const dRes = await fetch(`/api/approval/${old.id}`, {
+            headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+          })
+          const dJson = (await dRes.json()) as ApiSuccess<ProcessDetail> | ApiFail
+          if (!dJson.success) throw new Error(dJson.error.message)
+          const oldIds = [...dJson.data.nodes].sort((a, b) => a.sortOrder - b.sortOrder)
+          const nodesPayload = sortedNodes.map((n, i) => ({
+            ...(oldIds[i]?.id ? { id: oldIds[i].id } : {}),
+            sortOrder: i,
+            name: n.name.trim(),
+            approverUserId: n.approverUserId?.trim() ? n.approverUserId : null,
+            approverRole: n.approverRole.trim() || null,
+            isParallelGroup: false,
+            minTotalAmount: n.minTotalAmount.trim() || null,
+            maxTotalAmount: n.maxTotalAmount.trim() || null,
+          }))
+          const res = await fetch(`/api/settings/approval-flow/${old.id}`, {
+            method: "PUT",
+            headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+            body: JSON.stringify({
+              name: p.name,
+              bizType: p.bizType,
+              isActive: p.isActive,
+              nodes: nodesPayload,
+            }),
+          })
+          const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          updatedCount += 1
+        } else {
+          const res = await fetch("/api/approval/create", {
+            method: "POST",
+            headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+            body: JSON.stringify({
+              name: p.name,
+              bizType: p.bizType,
+              isActive: p.isActive,
+              nodes: normalizeNodesForApi(sortedNodes, false),
+            }),
+          })
+          const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          createdCount += 1
+        }
+      }
+      await load()
+      setImportOpen(false)
+      toast.success(`导入完成：新增 ${createdCount}，更新 ${updatedCount}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "导入失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="container max-w-5xl space-y-6 py-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -338,10 +549,20 @@ export default function ApprovalFlowSettingsPage() {
             维护本组织审批模板、节点顺序与审批人；预算类流程可按总额区间路由节点。
           </p>
         </div>
-        <Button type="button" onClick={openCreate}>
-          <PlusIcon className="size-4" />
-          新建流程
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={() => void exportExcel()}>
+            <DownloadIcon className="mr-2 size-4" />
+            导出 Excel
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+            <UploadIcon className="mr-2 size-4" />
+            导入 Excel
+          </Button>
+          <Button type="button" onClick={openCreate}>
+            <PlusIcon className="size-4" />
+            新建流程
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -701,6 +922,35 @@ export default function ApprovalFlowSettingsPage() {
               ) : null}
               保存
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>导入审批流程</DialogTitle>
+            <DialogDescription>请先下载模板并填写，再上传 Excel。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button type="button" variant="outline" onClick={() => void downloadTemplate()}>
+              下载模板
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(false)}>
+                取消
+              </Button>
+              <Button disabled={saving} onClick={() => fileInputRef.current?.click()}>
+                {saving ? <Loader2Icon className="size-4 animate-spin" /> : "选择并导入"}
+              </Button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => void onImportFileSelected(e)}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

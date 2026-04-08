@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Loader2Icon, PencilIcon, UserPlusIcon } from "lucide-react"
+import { DownloadIcon, Loader2Icon, PencilIcon, UploadIcon, UserPlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -34,6 +34,8 @@ import {
 } from "@/components/ui/table"
 import { ROLE_LABEL, USER_ROLE_VALUES, type UserRoleType } from "@/lib/auth/roles"
 import { UserStatus } from "@/generated/prisma/enums"
+import { downloadXlsxUint8 } from "@/lib/excel/download-xlsx"
+import { readSimpleExcelBuffer, writeSimpleExcelBuffer } from "@/lib/excel/simple-sheet"
 
 type ApiSuccess<T> = { success: true; data: T; error: null }
 type ApiFail = {
@@ -62,6 +64,8 @@ export function UsersAdminClient() {
   const [loading, setLoading] = React.useState(true)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editRow, setEditRow] = React.useState<UserRow | null>(null)
+  const [importOpen, setImportOpen] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   const [cEmail, setCEmail] = React.useState("")
   const [cName, setCName] = React.useState("")
@@ -194,6 +198,90 @@ export function UsersAdminClient() {
     }
   }
 
+  async function downloadTemplate() {
+    const u8 = await writeSimpleExcelBuffer([
+      {
+        name: "用户",
+        headers: ["邮箱", "姓名", "角色", "状态", "初始密码"],
+        rows: [
+          ["demo.viewer@company.com", "演示访客", "VIEWER", "正常", "Passw0rd!"],
+          ["demo.approver@company.com", "演示审批", "APPROVER", "正常", "Passw0rd!"],
+          ["demo.manager@company.com", "演示编制", "BUDGET_MANAGER", "正常", "Passw0rd!"],
+          ["demo.inactive@company.com", "演示待审批", "VIEWER", "待审批/停用", "Passw0rd!"],
+          ["demo.admin@company.com", "演示管理员", "ADMIN", "正常", "Passw0rd!"],
+        ],
+      },
+    ])
+    downloadXlsxUint8(u8, "用户管理_导入模板.xlsx")
+    toast.success("模板已下载")
+  }
+
+  async function onImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setSaving(true)
+    try {
+      const sheets = await readSimpleExcelBuffer(await file.arrayBuffer())
+      const first = sheets[0]
+      if (!first) return
+      const emailIdx = first.headers.findIndex((h) => h === "邮箱")
+      const nameIdx = first.headers.findIndex((h) => h === "姓名")
+      const roleIdx = first.headers.findIndex((h) => h === "角色")
+      const statusIdx = first.headers.findIndex((h) => h === "状态")
+      const passwordIdx = first.headers.findIndex((h) => h === "初始密码")
+      if (emailIdx < 0 || nameIdx < 0 || roleIdx < 0) {
+        toast.error("模板不匹配：至少需要「邮箱/姓名/角色」列")
+        return
+      }
+      const byEmail = new Map(items.map((x) => [x.email.toLowerCase(), x]))
+      let createdCount = 0
+      let updatedCount = 0
+      for (const row of first.rows) {
+        const email = (row[emailIdx] ?? "").trim().toLowerCase()
+        const name = (row[nameIdx] ?? "").trim()
+        const role = (row[roleIdx] ?? "").trim() as UserRoleType
+        if (!email || !name || !USER_ROLE_VALUES.includes(role)) continue
+        const statusText = statusIdx >= 0 ? (row[statusIdx] ?? "").trim() : ""
+        const status =
+          statusText === "待审批/停用" ? UserStatus.INACTIVE : UserStatus.ACTIVE
+        const password = passwordIdx >= 0 ? (row[passwordIdx] ?? "").trim() : ""
+        const old = byEmail.get(email)
+        if (old) {
+          const body: Record<string, unknown> = { name, role, status }
+          if (password) body.password = password
+          const res = await fetch(`/api/users/${old.id}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+          const json = (await res.json()) as ApiSuccess<{ user: UserRow }> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          updatedCount += 1
+        } else {
+          if (!password) throw new Error(`新用户缺少初始密码：${email}`)
+          const res = await fetch("/api/users", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, name, role, password }),
+          })
+          const json = (await res.json()) as ApiSuccess<{ user: UserRow }> | ApiFail
+          if (!json.success) throw new Error(json.error.message)
+          createdCount += 1
+        }
+      }
+      await load()
+      setImportOpen(false)
+      toast.success(`导入完成：新增 ${createdCount}，更新 ${updatedCount}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "导入失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Alert>
@@ -203,7 +291,15 @@ export function UsersAdminClient() {
         </AlertDescription>
       </Alert>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" onClick={() => void downloadTemplate()}>
+          <DownloadIcon className="mr-2 size-4" />
+          下载模板
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+          <UploadIcon className="mr-2 size-4" />
+          导入 Excel
+        </Button>
         <Button onClick={() => setCreateOpen(true)}>
           <UserPlusIcon className="mr-2 size-4" />
           新建用户
@@ -412,6 +508,30 @@ export function UsersAdminClient() {
             <Button disabled={saving} onClick={() => void submitEdit()}>
               {saving ? <Loader2Icon className="size-4 animate-spin" /> : "保存"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>导入用户</DialogTitle>
+            <DialogDescription>请先下载模板，按列填写后上传。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              取消
+            </Button>
+            <Button disabled={saving} onClick={() => fileInputRef.current?.click()}>
+              {saving ? <Loader2Icon className="size-4 animate-spin" /> : "选择并导入"}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => void onImportFileSelected(e)}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
