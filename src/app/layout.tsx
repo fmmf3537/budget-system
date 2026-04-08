@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: { default: "预算系统", template: "%s | 预算系统" },
-  description: "预算编制、审批、调整与资金计划",
+  title: { default: "辰航卓越预算系统", template: "%s | 辰航卓越预算系统" },
+  description: "西安辰航卓越科技有限公司预算管理平台：预算编制、审批、调整与资金计划",
 }
 
 /** Avoid Vercel build error "Unable to find lambda for route" (Next 16 + static prerender vs trace map). */

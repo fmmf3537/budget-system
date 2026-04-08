@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation"
 import { hasPermission } from "@/lib/auth/permissions"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
-import { useI18n } from "@/contexts/i18n-context"
 import { useBudgetStore } from "@/stores/budget-store"
+import { Brand } from "@/components/brand/brand"
 
 import {
   HOME_HREF,
@@ -87,19 +87,10 @@ export function SidebarNavList({
 }
 
 export function Sidebar() {
-  const { t } = useI18n()
   return (
     <div className="flex h-full flex-col">
       <div className="border-sidebar-border flex h-14 items-center border-b px-4">
-        <Link
-          href={HOME_HREF}
-          className="text-sidebar-foreground flex items-center gap-2 font-semibold tracking-tight"
-        >
-          <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-8 items-center justify-center rounded-md text-sm">
-            预
-          </span>
-          <span>{t("app.shortTitle")}</span>
-        </Link>
+        <Brand href={HOME_HREF} size="sm" />
       </div>
       <div className="flex-1 overflow-y-auto py-4">
         <SidebarNavList className="px-2" />

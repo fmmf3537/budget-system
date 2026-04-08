@@ -32,6 +32,7 @@ import { ROLE_LABEL, USER_ROLE_VALUES, type UserRoleType } from "@/lib/auth/role
 import { useI18n } from "@/contexts/i18n-context"
 import { useBudgetStore } from "@/stores/budget-store"
 
+import { Brand } from "@/components/brand/brand"
 import { SidebarNavList } from "./sidebar"
 
 type ApiSuccess<T> = { success: true; data: T }
@@ -117,7 +118,9 @@ export function Header() {
           showCloseButton
         >
           <DialogHeader className="border-b px-4 py-3 text-left">
-            <DialogTitle>{t("app.shortTitle")}</DialogTitle>
+            <DialogTitle>
+              <Brand size="sm" />
+            </DialogTitle>
           </DialogHeader>
           <div className="max-h-[70vh] overflow-y-auto py-3">
             <SidebarNavList
@@ -128,6 +131,9 @@ export function Header() {
         </DialogContent>
       </Dialog>
 
+      <div className="hidden md:block">
+        <Brand size="sm" />
+      </div>
       <div className="text-muted-foreground min-w-0 flex-1 text-sm md:hidden">
         {t("app.shortTitle")}
       </div>

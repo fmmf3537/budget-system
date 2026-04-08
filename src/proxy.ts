@@ -26,7 +26,7 @@ export async function proxy(request: NextRequest) {
       const claims = await verifySessionToken(token)
       if (claims) {
         const url = request.nextUrl.clone()
-        url.pathname = "/"
+        url.pathname = "/budget"
         return NextResponse.redirect(url)
       }
     }

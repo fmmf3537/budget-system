@@ -11,6 +11,16 @@ type ThemeProviderProps = React.ComponentProps<typeof NextThemesProvider>
  * Shadcn 推荐：class 策略 + next-themes，与 globals.css / .dark 配套。
  */
 export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return <>{children}</>
+  }
+
   return (
     <NextThemesProvider
       storageKey={THEME_STORAGE_KEY}
