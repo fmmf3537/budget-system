@@ -17,6 +17,10 @@ type RouteRule = { match: (p: string) => boolean; permission: PermissionKey }
 /** 先匹配先生效（更具体的规则在前） */
 const ROUTE_RULES: RouteRule[] = [
   {
+    match: (p) => p.startsWith("/settings/profile"),
+    permission: Permission.BUDGET_VIEW,
+  },
+  {
     match: (p) => p.startsWith("/settings/users"),
     permission: Permission.USER_MANAGE,
   },

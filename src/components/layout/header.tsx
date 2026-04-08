@@ -254,6 +254,11 @@ export function Header() {
             {sessionActive ? (
               <>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/settings/profile" className="cursor-pointer">
+                    个人信息
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void logout()}>
                   <LogOutIcon className="mr-2 size-4" />
                   退出登录

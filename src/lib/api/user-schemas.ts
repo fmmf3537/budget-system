@@ -33,6 +33,67 @@ export const userUpdateBodySchema = z
   })
   .refine((o) => Object.keys(o).length > 0, { message: "至少提供一项要修改的字段" })
 
+export const userSelfUpdateBodySchema = z
+  .object({
+    email: z.string().trim().email("邮箱格式不正确").optional(),
+    name: z.string().trim().min(1, "姓名为必填").max(120).optional(),
+    currentPassword: z.string().optional(),
+    newPassword: z.string().min(8, "新密码至少 8 位").optional(),
+    newPasswordConfirm: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    const wantsPasswordChange =
+      v.currentPassword !== undefined ||
+      v.newPassword !== undefined ||
+      v.newPasswordConfirm !== undefined
+    if (wantsPasswordChange) {
+      if (!v.currentPassword) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["currentPassword"],
+          message: "请输入原密码",
+        })
+      }
+      if (!v.newPassword) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["newPassword"],
+          message: "请输入新密码",
+        })
+      }
+      if (!v.newPasswordConfirm) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["newPasswordConfirm"],
+          message: "请再次输入新密码",
+        })
+      }
+      if (
+        v.newPassword &&
+        v.newPasswordConfirm &&
+        v.newPassword !== v.newPasswordConfirm
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["newPasswordConfirm"],
+          message: "两次输入的新密码不一致",
+        })
+      }
+    }
+    if (
+      v.email === undefined &&
+      v.name === undefined &&
+      !wantsPasswordChange
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [],
+        message: "至少提供一项要修改的字段",
+      })
+    }
+  })
+
 export type UserCreateBody = z.infer<typeof userCreateBodySchema>
 export type UserRegisterBody = z.infer<typeof userRegisterBodySchema>
 export type UserUpdateBody = z.infer<typeof userUpdateBodySchema>
+export type UserSelfUpdateBody = z.infer<typeof userSelfUpdateBodySchema>

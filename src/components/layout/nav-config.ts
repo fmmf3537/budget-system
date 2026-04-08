@@ -53,6 +53,11 @@ export const MAIN_NAV: MainNavItem[] = [
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
   {
+    href: "/settings/profile",
+    label: "个人信息",
+    permission: Permission.BUDGET_VIEW,
+  },
+  {
     href: "/settings/master-data",
     label: "主数据管理",
     permission: Permission.SETTINGS_MANAGE,
