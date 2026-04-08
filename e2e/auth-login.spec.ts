@@ -16,7 +16,7 @@ test.describe("auth login", () => {
     await page.getByLabel("密码").fill(password)
     await page.getByRole("button", { name: "登录" }).click()
 
-    await expect(page).not.toHaveURL(/\/login$/)
+    await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
 
     const cookies = await page.context().cookies()
     expect(cookies.some((c) => c.name === "bs_session" && c.value.length > 0)).toBeTruthy()
