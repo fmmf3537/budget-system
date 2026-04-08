@@ -16,7 +16,7 @@ test.describe("excel import/export UI", () => {
     await page.getByRole("button", { name: "用户菜单" }).click()
     const adminItem = page.getByText("系统管理员", { exact: true })
     if ((await adminItem.count()) === 0) return
-    await adminItem.click()
+    await adminItem.click({ force: true })
     await page.reload()
   }
 

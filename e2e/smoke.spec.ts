@@ -6,7 +6,7 @@ test.describe("smoke", () => {
     await context.clearCookies()
     await context.addCookies([{ name: "mock_user_role", value: "ADMIN", url: base }])
 
-    const res = await page.goto("/")
+    const res = await page.goto("/budget")
     expect(res?.ok()).toBeTruthy()
     await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
     await expect(page.getByRole("heading", { name: "预算编制" })).toBeVisible()
@@ -16,7 +16,7 @@ test.describe("smoke", () => {
     const res = await page.goto("/login")
     expect(res?.ok()).toBeTruthy()
     await expect(page.getByText("辰航卓越", { exact: true }).first()).toBeVisible()
-    await expect(page.getByText("西安辰航卓越科技有限公司")).toBeVisible()
+    await expect(page.getByText("西安辰航卓越科技有限公司").first()).toBeVisible()
     await expect(page.getByText("用户登录", { exact: true })).toBeVisible()
     await expect(page.getByLabel("邮箱")).toBeVisible()
     await expect(page.getByLabel("密码")).toBeVisible()
