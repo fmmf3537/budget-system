@@ -116,9 +116,11 @@ export function Header() {
         credentials: "include",
       })
     } finally {
+      document.cookie = `mock_org_id=; path=/; max-age=0; SameSite=Lax`
+      document.cookie = `mock_user_id=; path=/; max-age=0; SameSite=Lax`
+      document.cookie = `mock_user_role=; path=/; max-age=0; SameSite=Lax`
       clearSessionAndResetMock()
-      router.refresh()
-      router.push("/login")
+      window.location.href = "/login"
     }
   }
 
