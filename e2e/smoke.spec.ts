@@ -7,7 +7,7 @@ test.describe("smoke", () => {
     const res = await page.goto("/")
     expect(res?.ok()).toBeTruthy()
     await expect(page).toHaveURL(/\/login(?:\?.*)?$/)
-    await expect(page.getByRole("heading", { name: "用户登录" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "预算管理平台" })).toBeVisible()
   })
 
   test("login page responds and shows form", async ({ page }) => {

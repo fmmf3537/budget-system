@@ -68,8 +68,7 @@ export default function LoginPage() {
         role: u.role,
       })
       toast.success("登录成功")
-      router.replace("/budget")
-      router.refresh()
+      window.location.href = "/budget"
     } catch {
       toast.error("网络异常")
     } finally {

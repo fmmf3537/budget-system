@@ -115,6 +115,6 @@ describe("POST /api/auth/login", () => {
       }),
     })
     const res = await POST(req)
-    expect(res.status).toBe(401)
+    expect(res.status).toBe(403)
   })
 })
