@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useTheme } from "next-themes"
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
 
+import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -17,7 +17,7 @@ import {
 import { useI18n } from "@/contexts/i18n-context"
 
 /**
- * Shadcn + next-themes：浅色 / 深色 / 跟随系统
+ * 浅色 / 深色 / 跟随系统
  */
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
@@ -34,6 +34,12 @@ export function ThemeToggle() {
         <SunIcon className="size-4 opacity-0" />
       </Button>
     )
+  }
+
+  function onThemeChange(value: string) {
+    if (value === "light" || value === "dark" || value === "system") {
+      setTheme(value)
+    }
   }
 
   return (
@@ -54,7 +60,7 @@ export function ThemeToggle() {
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={theme ?? "system"}
-          onValueChange={setTheme}
+          onValueChange={onThemeChange}
         >
           <DropdownMenuRadioItem value="light" className="gap-2">
             <SunIcon className="size-4" />
