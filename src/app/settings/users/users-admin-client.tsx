@@ -54,7 +54,7 @@ type UserRow = {
 
 const STATUS_LABEL: Record<UserStatus, string> = {
   [UserStatus.ACTIVE]: "正常",
-  [UserStatus.INACTIVE]: "停用",
+  [UserStatus.INACTIVE]: "待审批/停用",
 }
 
 export function UsersAdminClient() {
@@ -171,6 +171,29 @@ export function UsersAdminClient() {
     }
   }
 
+  async function approveRegistration(user: UserRow) {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: UserStatus.ACTIVE }),
+      })
+      const json = (await res.json()) as ApiSuccess<{ user: UserRow }> | ApiFail
+      if (!json.success) {
+        toast.error(json.error.message ?? "审批失败")
+        return
+      }
+      toast.success("已批准注册，该用户现在可登录")
+      await load()
+    } catch {
+      toast.error("审批失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Alert>
@@ -201,7 +224,7 @@ export function UsersAdminClient() {
                 <TableHead>邮箱</TableHead>
                 <TableHead>角色</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="w-[100px]">操作</TableHead>
+                <TableHead className="w-[220px]">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -231,14 +254,25 @@ export function UsersAdminClient() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="编辑"
-                        onClick={() => openEdit(u)}
-                      >
-                        <PencilIcon className="size-4" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {u.status === UserStatus.INACTIVE ? (
+                          <Button
+                            size="sm"
+                            disabled={saving}
+                            onClick={() => void approveRegistration(u)}
+                          >
+                            批准注册
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="编辑"
+                          onClick={() => openEdit(u)}
+                        >
+                          <PencilIcon className="size-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -357,7 +391,7 @@ export function UsersAdminClient() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={UserStatus.ACTIVE}>正常</SelectItem>
-                  <SelectItem value={UserStatus.INACTIVE}>停用</SelectItem>
+                  <SelectItem value={UserStatus.INACTIVE}>待审批/停用</SelectItem>
                 </SelectContent>
               </Select>
             </div>

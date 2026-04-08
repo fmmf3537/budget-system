@@ -8,6 +8,7 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/") return true
   if (pathname === "/unauthorized") return true
   if (pathname === "/login") return true
+  if (pathname === "/register") return true
   return false
 }
 

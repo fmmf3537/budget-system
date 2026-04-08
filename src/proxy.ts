@@ -23,7 +23,7 @@ export async function proxy(request: NextRequest) {
   const claims = token ? await verifySessionToken(token) : null
   const authenticated = Boolean(claims)
 
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/register") {
     if (authenticated) {
       const url = request.nextUrl.clone()
       url.pathname = "/budget"

@@ -12,12 +12,12 @@ import { Brand } from "@/components/brand/brand"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/register") {
     return (
       <div className="bg-background flex min-h-screen flex-col">
         <header className="bg-background/90 supports-[backdrop-filter]:bg-background/70 sticky top-0 z-40 border-b backdrop-blur">
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-            <Brand href="/login" size="sm" showFullName />
+            <Brand href={pathname} size="sm" showFullName />
             <div className="text-muted-foreground text-xs">
               预算管理平台
             </div>

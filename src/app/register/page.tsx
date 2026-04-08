@@ -17,59 +17,42 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { UserRoleType } from "@/lib/auth/roles"
-import { useBudgetStore } from "@/stores/budget-store"
 
-type LoginOk = {
+type RegisterOk = {
   success: true
-  data: {
-    user: {
-      id: string
-      email: string
-      name: string
-      role: UserRoleType
-      organizationId: string
-    }
-  }
+  data: { message?: string }
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter()
-  const setSessionFromServer = useBudgetStore((s) => s.setSessionFromServer)
   const [email, setEmail] = React.useState("")
+  const [name, setName] = React.useState("")
   const [password, setPassword] = React.useState("")
+  const [passwordConfirm, setPasswordConfirm] = React.useState("")
   const [loading, setLoading] = React.useState(false)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, name, password, passwordConfirm }),
       })
-      const json = (await res.json()) as LoginOk | { success: false; error?: { message?: string } }
+      const json = (await res.json()) as RegisterOk | { success: false; error?: { message?: string } }
       if (!res.ok || !json.success) {
         toast.error(
           "success" in json && json.success === false
-            ? (json as { error?: { message?: string } }).error?.message ??
-                "登录失败"
-            : "登录失败"
+            ? json.error?.message ?? "注册失败"
+            : "注册失败"
         )
         return
       }
-      const u = json.data.user
-      setSessionFromServer({
-        displayName: u.name,
-        organizationId: u.organizationId,
-        userId: u.id,
-        role: u.role,
-      })
-      toast.success("登录成功")
-      router.replace("/budget")
-      router.refresh()
+      toast.success(
+        json.data.message ?? "注册申请已提交，请等待管理员审批后登录"
+      )
+      router.replace("/login")
     } catch {
       toast.error("网络异常")
     } finally {
@@ -90,19 +73,15 @@ export default function LoginPage() {
       <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center gap-6 px-4 py-10 md:flex-row md:items-stretch md:py-14">
         <section className="hidden w-full flex-1 flex-col justify-between rounded-2xl border bg-card/50 p-8 shadow-sm backdrop-blur md:flex">
           <div className="space-y-5">
-            <Brand href="/login" size="lg" showFullName />
+            <Brand href="/register" size="lg" showFullName />
             <div className="space-y-2">
               <h1 className="text-2xl font-semibold tracking-tight">
-                预算管理平台
+                账号注册
               </h1>
               <p className="text-muted-foreground text-sm leading-6">
-                覆盖预算编制、审批流转、预算调整与资金计划，全流程可追溯。
+                注册后默认进入待审批状态，由系统管理员审核通过后方可登录系统。
               </p>
             </div>
-          </div>
-          <div className="text-muted-foreground text-xs leading-5">
-            <p>建议使用现代浏览器（Chrome / Edge）以获得最佳体验。</p>
-            <p>如需开通账号，请联系系统管理员。</p>
           </div>
         </section>
 
@@ -110,59 +89,70 @@ export default function LoginPage() {
           <Card className="w-full shadow-sm">
             <CardHeader className="space-y-2">
               <div className="md:hidden">
-                <Brand href="/login" size="md" showFullName />
+                <Brand href="/register" size="md" showFullName />
               </div>
-              <CardTitle className="text-xl">用户登录</CardTitle>
+              <CardTitle className="text-xl">用户注册</CardTitle>
               <CardDescription>
-                请输入企业账号邮箱与密码。种子数据默认密码为{" "}
-                <span className="text-foreground font-medium">ChangeMe123!</span>
+                填写姓名、邮箱与密码。提交后需管理员审批。
               </CardDescription>
             </CardHeader>
             <form onSubmit={onSubmit}>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">邮箱</Label>
+                  <Label htmlFor="name">姓名</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    autoComplete="username"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@company.com"
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password">密码</Label>
+                  <Label htmlFor="email">邮箱</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">密码（至少 8 位）</Label>
                   <Input
                     id="password"
                     type="password"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    minLength={8}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="passwordConfirm">确认密码</Label>
+                  <Input
+                    id="passwordConfirm"
+                    type="password"
+                    autoComplete="new-password"
+                    value={passwordConfirm}
+                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                    minLength={8}
                     required
                   />
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col gap-3">
                 <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "登录中…" : "登录"}
-                </Button>
-                <p className="text-muted-foreground text-center text-xs">
-                  支持注册。注册后需管理员在「用户管理」中审批通过。
-                </p>
-                <Button variant="outline" asChild className="w-full">
-                  <Link href="/register">去注册</Link>
+                  {loading ? "提交中…" : "提交注册申请"}
                 </Button>
                 <Button variant="link" asChild className="text-xs">
-                  <Link href="/budget">直接进入系统</Link>
+                  <Link href="/login">返回登录</Link>
                 </Button>
               </CardFooter>
             </form>
           </Card>
-          <p className="text-muted-foreground mt-4 text-center text-xs leading-5">
-            登录即表示你同意系统的安全与使用规范。
-          </p>
         </section>
       </div>
     </div>

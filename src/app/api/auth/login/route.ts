@@ -37,12 +37,11 @@ export async function POST(request: Request) {
     },
   })
 
-  if (
-    !user ||
-    user.status !== UserStatus.ACTIVE ||
-    !verifyPassword(parsed.data.password, user.passwordHash)
-  ) {
+  if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
     return fail("AUTH_FAILED", "邮箱或密码错误", 401)
+  }
+  if (user.status !== UserStatus.ACTIVE) {
+    return fail("PENDING_APPROVAL", "账号待管理员审批通过后方可登录", 403)
   }
 
   const role = normalizeRole(user.role)
