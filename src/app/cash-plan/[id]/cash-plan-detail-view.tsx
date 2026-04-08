@@ -67,12 +67,9 @@ import {
 } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
-import {
-  buildEmptyCashPlanTemplateBuffer,
-  readCashPlanLinesFromExcelBuffer,
-  writeCashPlanExcelBuffer,
-  type CashPlanExcelRowError,
-  type CashPlanLineImportDto,
+import type {
+  CashPlanExcelRowError,
+  CashPlanLineImportDto,
 } from "@/lib/cash-plan/excel-cash-plan-lines"
 import { useBudgetStore } from "@/stores/budget-store"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -172,6 +169,10 @@ type CatOpt = { code: string; name: string }
 
 const CP_CAT_NONE = "__none__"
 const CP_CAT_ORPHAN = "__orphan__"
+
+async function loadCashPlanExcelModule() {
+  return import("@/lib/cash-plan/excel-cash-plan-lines")
+}
 
 function CashPlanCategorySelect({
   options,
@@ -550,7 +551,8 @@ export function CashPlanDetailView() {
     if (!plan) return
     setCashExcelBusy(true)
     try {
-      const u8 = await writeCashPlanExcelBuffer(plan.incomes, plan.expenses)
+      const excel = await loadCashPlanExcelModule()
+      const u8 = await excel.writeCashPlanExcelBuffer(plan.incomes, plan.expenses)
       const blob = new Blob([Uint8Array.from(u8)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       })
@@ -568,7 +570,8 @@ export function CashPlanDetailView() {
   async function handleCashPlanTemplateDownload() {
     setCashExcelBusy(true)
     try {
-      const u8 = await buildEmptyCashPlanTemplateBuffer()
+      const excel = await loadCashPlanExcelModule()
+      const u8 = await excel.buildEmptyCashPlanTemplateBuffer()
       const blob = new Blob([Uint8Array.from(u8)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       })
@@ -590,7 +593,8 @@ export function CashPlanDetailView() {
     setCashExcelParsed(null)
     try {
       const buf = await file.arrayBuffer()
-      const result = await readCashPlanLinesFromExcelBuffer(buf)
+      const excel = await loadCashPlanExcelModule()
+      const result = await excel.readCashPlanLinesFromExcelBuffer(buf)
       if (!result.ok) {
         setCashExcelErrors(result.errors)
         toast.error("解析失败")

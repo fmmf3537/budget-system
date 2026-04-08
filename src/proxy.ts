@@ -2,7 +2,6 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
 import { canAccessPathWithRole } from "@/lib/auth/access"
-import { MOCK_ROLE_COOKIE } from "@/lib/auth/cookie-names"
 import { normalizeRole } from "@/lib/auth/roles"
 import {
   SESSION_COOKIE_NAME,
@@ -20,25 +19,29 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value
+  const claims = token ? await verifySessionToken(token) : null
+  const authenticated = Boolean(claims)
+
   if (pathname === "/login") {
-    const token = request.cookies.get(SESSION_COOKIE_NAME)?.value
-    if (token) {
-      const claims = await verifySessionToken(token)
-      if (claims) {
-        const url = request.nextUrl.clone()
-        url.pathname = "/budget"
-        return NextResponse.redirect(url)
-      }
+    if (authenticated) {
+      const url = request.nextUrl.clone()
+      url.pathname = "/budget"
+      return NextResponse.redirect(url)
     }
     return NextResponse.next()
   }
 
-  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value
-  let role = normalizeRole(request.cookies.get(MOCK_ROLE_COOKIE)?.value)
-  if (token) {
-    const claims = await verifySessionToken(token)
-    if (claims) role = normalizeRole(claims.role)
+  if (!authenticated) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/login"
+    if (pathname !== "/") {
+      url.searchParams.set("from", pathname)
+    }
+    return NextResponse.redirect(url)
   }
+
+  const role = normalizeRole(claims?.role)
 
   if (!canAccessPathWithRole(pathname, role)) {
     const url = request.nextUrl.clone()

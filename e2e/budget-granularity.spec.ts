@@ -2,18 +2,32 @@ import { test, expect } from "@playwright/test"
 
 /**
  * 预算编制粒度 UI 回归（对应手工清单：列表筛选、新建表单粒度与期间预览）。
- * 需 webServer（npm run dev）；不依赖登录 Cookie，使用 mock 角色 Cookie 进入预算页。
+ * 需 webServer（npm run dev）；依赖 TEST_USER_* 登录。
  */
 test.describe("budget compilation granularity UI", () => {
   test.describe.configure({ mode: "serial" })
   test.setTimeout(90_000)
 
-  test.beforeEach(async ({ context }) => {
-    const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
+  const hasTestCreds =
+    Boolean(process.env.TEST_USER_EMAIL) &&
+    Boolean(process.env.TEST_USER_PASSWORD)
+
+  test.beforeEach(async ({ page, context }) => {
+    test.skip(
+      !hasTestCreds,
+      "Set TEST_USER_EMAIL and TEST_USER_PASSWORD for authenticated e2e"
+    )
+
+    const email = process.env.TEST_USER_EMAIL
+    const password = process.env.TEST_USER_PASSWORD
+    if (!email || !password) return
+
     await context.clearCookies()
-    await context.addCookies([
-      { name: "mock_user_role", value: "ADMIN", url: base },
-    ])
+    await page.goto("/login")
+    await page.getByLabel("邮箱").fill(email)
+    await page.getByLabel("密码").fill(password)
+    await page.getByRole("button", { name: "登录" }).click()
+    await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
   })
 
   test("budget list shows granularity filters and period column", async ({

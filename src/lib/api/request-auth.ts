@@ -9,6 +9,8 @@ import { normalizeRole } from "@/lib/auth/roles"
 import { UserStatus } from "@/generated/prisma/enums"
 import type { NextResponse } from "next/server"
 
+const requestAuthCache = new WeakMap<Request, Promise<MockAuthContext | null>>()
+
 function mockHeadersAllowed() {
   return process.env.AUTH_ALLOW_MOCK_HEADERS !== "0"
 }
@@ -20,28 +22,36 @@ function mockHeadersAllowed() {
 export async function getRequestAuth(
   request: Request
 ): Promise<MockAuthContext | null> {
-  const token = getSessionTokenFromRequest(request)
-  if (token) {
-    const payload = await verifySessionToken(token)
-    if (payload) {
-      const user = await prisma.user.findFirst({
-        where: {
-          id: payload.sub,
-          organizationId: payload.oid,
-          status: UserStatus.ACTIVE,
-        },
-      })
-      if (user?.role) {
-        return {
-          userId: user.id,
-          organizationId: user.organizationId,
-          role: normalizeRole(user.role),
+  const cached = requestAuthCache.get(request)
+  if (cached) return cached
+
+  const authPromise = (async (): Promise<MockAuthContext | null> => {
+    const token = getSessionTokenFromRequest(request)
+    if (token) {
+      const payload = await verifySessionToken(token)
+      if (payload) {
+        const user = await prisma.user.findFirst({
+          where: {
+            id: payload.sub,
+            organizationId: payload.oid,
+            status: UserStatus.ACTIVE,
+          },
+        })
+        if (user?.role) {
+          return {
+            userId: user.id,
+            organizationId: user.organizationId,
+            role: normalizeRole(user.role),
+          }
         }
       }
     }
-  }
-  if (!mockHeadersAllowed()) return null
-  return getMockAuth(request)
+    if (!mockHeadersAllowed()) return null
+    return getMockAuth(request)
+  })()
+
+  requestAuthCache.set(request, authPromise)
+  return authPromise
 }
 
 export async function requireAuth(

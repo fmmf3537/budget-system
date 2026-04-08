@@ -10,7 +10,7 @@ export function Brand({
   size?: "sm" | "md" | "lg"
   showFullName?: boolean
 }) {
-  const imgSize = size === "sm" ? 24 : size === "lg" ? 40 : 32
+  const logoBoxSize = size === "sm" ? 42 : size === "lg" ? 62 : 50
   const titleSize =
     size === "sm" ? "text-sm" : size === "lg" ? "text-xl" : "text-base"
   const subtitleSize = size === "sm" ? "text-xs" : "text-sm"
@@ -21,14 +21,17 @@ export function Brand({
       className="group flex items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       aria-label="辰航卓越"
     >
-      <div className="bg-background relative grid place-items-center overflow-hidden rounded-md border shadow-sm">
+      <div
+        className="bg-background relative overflow-hidden rounded-md border shadow-sm"
+        style={{ width: logoBoxSize, height: logoBoxSize }}
+      >
         <Image
-          src="/brand/chenhang-zhuoyue.png"
+          src="/brand/chenhang-zhuoyue-mark.png"
           alt="辰航卓越 Logo"
-          width={imgSize}
-          height={imgSize}
+          fill
           priority={size !== "sm"}
-          className="block"
+          quality={100}
+          className="object-contain p-1"
         />
       </div>
       <div className="min-w-0 leading-tight">

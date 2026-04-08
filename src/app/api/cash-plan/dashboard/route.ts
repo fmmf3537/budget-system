@@ -17,6 +17,10 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function monthKey(d: Date): string {
+  return dayjs.utc(d).format("YYYY-MM")
+}
+
 export async function GET(request: Request) {
   try {
     const authOrErr = await requireApiPermission(request, Permission.CASH_PLAN_VIEW)
@@ -49,31 +53,6 @@ export async function GET(request: Request) {
       .endOf("month")
       .toDate()
 
-    const [incomeRows, expenseRows] = await Promise.all([
-      prisma.cashPlanIncome.findMany({
-        where: {
-          header: { organizationId: auth.organizationId },
-          expectedDate: { gte: periodStart, lte: periodEnd },
-        },
-        select: { amount: true },
-      }),
-      prisma.cashPlanExpense.findMany({
-        where: {
-          header: { organizationId: auth.organizationId },
-          expectedDate: { gte: periodStart, lte: periodEnd },
-        },
-        select: { amount: true },
-      }),
-    ])
-
-    const inflowTotal = incomeRows.reduce((s, r) => s + num(r.amount), 0)
-    const outflowTotal = expenseRows.reduce((s, r) => s + num(r.amount), 0)
-    const netInflow = inflowTotal - outflowTotal
-
-    const base =
-      baseBalanceRaw !== undefined ? num(baseBalanceRaw) : 0
-    const estimatedClosing = base + netInflow
-
     const trend: Array<{
       key: string
       label: string
@@ -87,32 +66,57 @@ export async function GET(request: Request) {
       .add(1, "month")
       .startOf("month")
 
+    const trendEnd = firstFuture
+      .add(Math.max(0, trendMonths - 1), "month")
+      .endOf("month")
+      .toDate()
+
+    const [incomeAggRows, expenseAggRows] = await Promise.all([
+      prisma.cashPlanIncome.groupBy({
+        by: ["expectedDate"],
+        where: {
+          header: { organizationId: auth.organizationId },
+          expectedDate: { gte: periodStart, lte: trendEnd },
+        },
+        _sum: { amount: true },
+      }),
+      prisma.cashPlanExpense.groupBy({
+        by: ["expectedDate"],
+        where: {
+          header: { organizationId: auth.organizationId },
+          expectedDate: { gte: periodStart, lte: trendEnd },
+        },
+        _sum: { amount: true },
+      }),
+    ])
+
+    const inflowByMonth = new Map<string, number>()
+    const outflowByMonth = new Map<string, number>()
+    for (const row of incomeAggRows) {
+      if (!row.expectedDate) continue
+      const key = monthKey(row.expectedDate)
+      inflowByMonth.set(key, (inflowByMonth.get(key) ?? 0) + num(row._sum.amount))
+    }
+    for (const row of expenseAggRows) {
+      if (!row.expectedDate) continue
+      const key = monthKey(row.expectedDate)
+      outflowByMonth.set(key, (outflowByMonth.get(key) ?? 0) + num(row._sum.amount))
+    }
+
+    const currentKey = dayjs.utc(periodStart).format("YYYY-MM")
+    const inflowTotal = inflowByMonth.get(currentKey) ?? 0
+    const outflowTotal = outflowByMonth.get(currentKey) ?? 0
+    const netInflow = inflowTotal - outflowTotal
+
+    const base = baseBalanceRaw !== undefined ? num(baseBalanceRaw) : 0
+    const estimatedClosing = base + netInflow
+
     for (let i = 0; i < trendMonths; i++) {
       const d = firstFuture.add(i, "month")
-      const ms = d.startOf("month").toDate()
-      const me = d.endOf("month").toDate()
       const key = d.format("YYYY-MM")
       const label = d.format("YYYY年M月")
-
-      const [inc, exp] = await Promise.all([
-        prisma.cashPlanIncome.findMany({
-          where: {
-            header: { organizationId: auth.organizationId },
-            expectedDate: { gte: ms, lte: me },
-          },
-          select: { amount: true },
-        }),
-        prisma.cashPlanExpense.findMany({
-          where: {
-            header: { organizationId: auth.organizationId },
-            expectedDate: { gte: ms, lte: me },
-          },
-          select: { amount: true },
-        }),
-      ])
-
-      const inf = inc.reduce((s, r) => s + num(r.amount), 0)
-      const out = exp.reduce((s, r) => s + num(r.amount), 0)
+      const inf = inflowByMonth.get(key) ?? 0
+      const out = outflowByMonth.get(key) ?? 0
       trend.push({
         key,
         label,

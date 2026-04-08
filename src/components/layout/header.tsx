@@ -40,6 +40,12 @@ type TodoPayload = {
   pagination: { total: number }
 }
 
+const TODO_CACHE_TTL_MS = 30_000
+const todoCountCache = new Map<
+  string,
+  { total: number; expiresAt: number }
+>()
+
 function initialsFromNameOrId(nameOrId: string) {
   const t = nameOrId.trim()
   if (t.length <= 2) return t.toUpperCase() || "?"
@@ -62,7 +68,19 @@ export function Header() {
   const [todoTotal, setTodoTotal] = React.useState<number | null>(null)
 
   React.useEffect(() => {
+    if (!sessionActive) {
+      setTodoTotal(null)
+      return
+    }
+
     let cancelled = false
+    const cacheKey = `${mockOrgId}:${mockUserId}:${mockUserRole}`
+    const cached = todoCountCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      setTodoTotal(cached.total)
+      return
+    }
+
     async function load() {
       try {
         const res = await fetch("/api/approval/todo?page=1&pageSize=1", {
@@ -73,6 +91,10 @@ export function Header() {
           | { success: false }
         if (!cancelled && json.success) {
           setTodoTotal(json.data.pagination.total)
+          todoCountCache.set(cacheKey, {
+            total: json.data.pagination.total,
+            expiresAt: Date.now() + TODO_CACHE_TTL_MS,
+          })
         }
       } catch {
         if (!cancelled) setTodoTotal(null)
@@ -82,7 +104,7 @@ export function Header() {
     return () => {
       cancelled = true
     }
-  }, [mockOrgId, mockUserId, mockUserRole])
+  }, [mockOrgId, mockUserId, mockUserRole, sessionActive])
 
   const showTodoBadge =
     todoTotal !== null && todoTotal > 0 ? String(todoTotal) : null

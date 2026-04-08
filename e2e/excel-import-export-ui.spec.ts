@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test"
 
 /**
  * Excel 导入/导出相关 UI（预算表单、主数据导出）。
- * 使用 mock 角色 Cookie（与 budget-granularity.spec 一致）；依赖 dev 服务与可访问的页面。
+ * 依赖已登录会话（TEST_USER_*）与 dev 服务。
  */
 test.describe("excel import/export UI", () => {
   test.describe.configure({ mode: "serial" })
@@ -20,19 +20,26 @@ test.describe("excel import/export UI", () => {
     await page.reload()
   }
 
-  test.beforeEach(async ({ context }) => {
-    const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
+  const hasTestCreds =
+    Boolean(process.env.TEST_USER_EMAIL) &&
+    Boolean(process.env.TEST_USER_PASSWORD)
+
+  test.beforeEach(async ({ page, context }) => {
+    test.skip(
+      !hasTestCreds,
+      "Set TEST_USER_EMAIL and TEST_USER_PASSWORD for authenticated e2e"
+    )
+
+    const email = process.env.TEST_USER_EMAIL
+    const password = process.env.TEST_USER_PASSWORD
+    if (!email || !password) return
+
     await context.clearCookies()
-    await context.route("**/api/**", async (route) => {
-      const headers = {
-        ...route.request().headers(),
-        "x-mock-user-role": "ADMIN",
-      }
-      await route.continue({ headers })
-    })
-    await context.addCookies([
-      { name: "mock_user_role", value: "ADMIN", url: base },
-    ])
+    await page.goto("/login")
+    await page.getByLabel("邮箱").fill(email)
+    await page.getByLabel("密码").fill(password)
+    await page.getByRole("button", { name: "登录" }).click()
+    await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
   })
 
   test("new budget page shows Excel export/import and import dialog", async ({

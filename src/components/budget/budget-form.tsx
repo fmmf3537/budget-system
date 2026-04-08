@@ -17,12 +17,9 @@ import { z } from "zod"
 
 import { BUDGET_COMPILATION_METHODS } from "@/lib/api/budget-schemas"
 import { buildMockHeaders as buildMockAuthHeaders } from "@/lib/api/mock-headers"
-import {
-  buildEmptyBudgetTemplateBuffer,
-  readBudgetLinesFromExcelBuffer,
-  writeBudgetLinesExcelBuffer,
-  type BudgetExcelRowError,
-  type BudgetExcelFormLine,
+import type {
+  BudgetExcelRowError,
+  BudgetExcelFormLine,
 } from "@/lib/budget/excel-budget-lines"
 import { computeBudgetPeriod } from "@/lib/budget/period"
 import {
@@ -225,6 +222,10 @@ type CodeName = { code: string; name: string }
 const LINE_SELECT_NONE = "__none__"
 const LINE_ORPHAN_PREFIX = "__orphan__"
 
+async function loadBudgetExcelModule() {
+  return import("@/lib/budget/excel-budget-lines")
+}
+
 function BudgetLineCodeSelect({
   options,
   value,
@@ -418,7 +419,8 @@ export function BudgetForm({
         dimension1: l.dimension1?.trim() ? l.dimension1.trim() : null,
         dimension2: l.dimension2?.trim() ? l.dimension2.trim() : null,
       }))
-      const u8 = await writeBudgetLinesExcelBuffer(
+      const excel = await loadBudgetExcelModule()
+      const u8 = await excel.writeBudgetLinesExcelBuffer(
         exportLines,
         subjectById,
         tplLabels
@@ -439,7 +441,8 @@ export function BudgetForm({
   async function handleDownloadBudgetTemplate() {
     setExcelBusy(true)
     try {
-      const u8 = await buildEmptyBudgetTemplateBuffer(tplLabels)
+      const excel = await loadBudgetExcelModule()
+      const u8 = await excel.buildEmptyBudgetTemplateBuffer(tplLabels)
       const blob = new Blob([Uint8Array.from(u8)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       })
@@ -461,7 +464,8 @@ export function BudgetForm({
     setExcelParsedLines(null)
     try {
       const buf = await file.arrayBuffer()
-      const result = await readBudgetLinesFromExcelBuffer(
+      const excel = await loadBudgetExcelModule()
+      const result = await excel.readBudgetLinesFromExcelBuffer(
         buf,
         tplLabels,
         subjects

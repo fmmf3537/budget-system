@@ -1,15 +1,13 @@
 import { test, expect } from "@playwright/test"
 
 test.describe("smoke", () => {
-  test("root redirects to budget page", async ({ page, context }) => {
-    const base = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
+  test("unauthenticated user is redirected to login", async ({ page, context }) => {
     await context.clearCookies()
-    await context.addCookies([{ name: "mock_user_role", value: "ADMIN", url: base }])
 
-    const res = await page.goto("/budget")
+    const res = await page.goto("/")
     expect(res?.ok()).toBeTruthy()
-    await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
-    await expect(page.getByRole("heading", { name: "预算编制" })).toBeVisible()
+    await expect(page).toHaveURL(/\/login(?:\?.*)?$/)
+    await expect(page.getByRole("heading", { name: "用户登录" })).toBeVisible()
   })
 
   test("login page responds and shows form", async ({ page }) => {
