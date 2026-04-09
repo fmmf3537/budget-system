@@ -4,6 +4,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Layers,
+  Network,
   SlidersHorizontal,
   Users,
   Wallet,
@@ -54,6 +55,14 @@ const modules = [
     title: "用户管理",
     description: "本组织用户账号、角色与启用状态。",
     icon: Users,
+    primary: false,
+  },
+  {
+    href: "/settings/organizations",
+    title: "组织管理",
+    description:
+      "本租户组织树：名称、编码、状态与上下级；仅系统管理员。",
+    icon: Network,
     primary: false,
   },
   {

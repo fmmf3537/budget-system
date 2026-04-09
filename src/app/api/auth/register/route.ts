@@ -3,8 +3,9 @@ import { userRegisterBodySchema } from "@/lib/api/user-schemas"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { created, fail, fromZodError } from "@/lib/api/response"
 import { hashPassword } from "@/lib/auth/password"
+import { resolveRegistrationOrganizationId } from "@/lib/auth/registration-org"
 import { UserRole } from "@/lib/auth/roles"
-import { OrgStatus, UserStatus } from "@/generated/prisma/enums"
+import { UserStatus } from "@/generated/prisma/enums"
 
 export async function POST(request: Request) {
   try {
@@ -32,12 +33,8 @@ export async function POST(request: Request) {
       return fail("PENDING_APPROVAL", "该账号正在审批中或已停用，请联系管理员", 409)
     }
 
-    const org = await prisma.organization.findFirst({
-      where: { status: OrgStatus.ACTIVE },
-      orderBy: { createdAt: "asc" },
-      select: { id: true, name: true },
-    })
-    if (!org) {
+    const orgId = await resolveRegistrationOrganizationId()
+    if (!orgId) {
       return fail("ORG_NOT_READY", "系统尚未配置可用组织，请联系管理员", 503)
     }
 
@@ -48,7 +45,7 @@ export async function POST(request: Request) {
         passwordHash: hashPassword(password),
         role: UserRole.VIEWER,
         status: UserStatus.INACTIVE,
-        organizationId: org.id,
+        organizationId: orgId,
       },
       select: {
         id: true,

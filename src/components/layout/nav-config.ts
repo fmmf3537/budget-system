@@ -68,6 +68,11 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     permission: Permission.USER_MANAGE,
   },
   {
+    href: "/settings/organizations",
+    label: "组织管理",
+    permission: Permission.ORG_MANAGE,
+  },
+  {
     href: "/settings/approval-flow",
     label: "审批流程",
     permission: Permission.SETTINGS_MANAGE,

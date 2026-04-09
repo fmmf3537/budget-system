@@ -9,20 +9,22 @@ export async function getDepartmentLevel(
   id: string
 ): Promise<number> {
   let level = 1
-  let row = await prisma.budgetDepartment.findFirst({
-    where: { id, organizationId },
-    select: { parentId: true },
-  })
-  if (!row) return 0
-  while (row.parentId) {
-    level++
-    if (level > MAX_DEPARTMENT_TREE_LEVEL + 2) break
-    const parent = await prisma.budgetDepartment.findFirst({
-      where: { id: row.parentId, organizationId },
+  let cur: { parentId: string | null } | null =
+    await prisma.budgetDepartment.findFirst({
+      where: { id, organizationId },
       select: { parentId: true },
     })
+  if (!cur) return 0
+  while (cur.parentId) {
+    level++
+    if (level > MAX_DEPARTMENT_TREE_LEVEL + 2) break
+    const parent: { parentId: string | null } | null =
+      await prisma.budgetDepartment.findFirst({
+        where: { id: cur.parentId, organizationId },
+        select: { parentId: true },
+      })
     if (!parent) break
-    row = parent
+    cur = parent
   }
   return level
 }

@@ -25,6 +25,10 @@ const ROUTE_RULES: RouteRule[] = [
     permission: Permission.USER_MANAGE,
   },
   {
+    match: (p) => p.startsWith("/settings/organizations"),
+    permission: Permission.ORG_MANAGE,
+  },
+  {
     match: (p) => p.startsWith("/settings"),
     permission: Permission.SETTINGS_MANAGE,
   },

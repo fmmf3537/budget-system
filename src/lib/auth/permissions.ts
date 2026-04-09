@@ -5,6 +5,8 @@ export const Permission = {
   SETTINGS_MANAGE: "settings:manage",
   /** 用户与角色管理（系统管理员） */
   USER_MANAGE: "users:manage",
+  /** 本租户组织树维护（仅管理员具备） */
+  ORG_MANAGE: "org:manage",
   BUDGET_VIEW: "budget:view",
   BUDGET_CREATE: "budget:create",
   BUDGET_EDIT: "budget:edit",
