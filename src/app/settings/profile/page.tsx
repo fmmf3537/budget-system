@@ -28,7 +28,16 @@ type MeUser = {
 }
 
 type ApiSuccess<T> = { success: true; data: T; error: null }
-type ApiFail = { success: false; data: null; error: { message: string } }
+type ApiFail = {
+  success: false
+  data: null
+  error: {
+    message: string
+    details?: {
+      fieldErrors?: Record<string, string[]>
+    }
+  }
+}
 
 export default function ProfileSettingsPage() {
   const setSessionFromServer = useBudgetStore((s) => s.setSessionFromServer)
@@ -114,7 +123,14 @@ export default function ProfileSettingsPage() {
       })
       const json = (await res.json()) as ApiSuccess<{ user: MeUser }> | ApiFail
       if (!json.success) {
-        toast.error(json.error.message)
+        const fieldErrors = json.error.details?.fieldErrors
+        if (fieldErrors && Object.keys(fieldErrors).length > 0) {
+          const firstField = Object.keys(fieldErrors)[0]
+          const firstError = fieldErrors[firstField]?.[0]
+          toast.error(firstError || json.error.message)
+        } else {
+          toast.error(json.error.message)
+        }
         return
       }
       setCurrentPassword("")
