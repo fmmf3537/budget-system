@@ -9,6 +9,7 @@ import { ApprovalBizType } from "@/generated/prisma/enums"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import { ENTITY_CASH_PLAN_HEADER } from "@/lib/api/cash-plan-constants"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -63,6 +64,7 @@ const BIZ_LABEL: Record<string, string> = {
 const ENTITY_LABEL: Record<string, string> = {
   [ENTITY_BUDGET_HEADER]: "预算",
   [ENTITY_CASH_PLAN_HEADER]: "资金计划",
+  [ENTITY_CASH_PLAN_SUB_PLAN]: "资金子计划",
   [ENTITY_BUDGET_ADJUSTMENT]: "预算调整",
 }
 
@@ -97,9 +99,41 @@ type ApiFail = {
   error: { code: string; message: string }
 }
 
+type DetailLine = {
+  id: string
+  category: string | null
+  amount: string | null
+  expectedDate: string | null
+  remark: string | null
+}
+
+type ApprovalDetailLite = {
+  cashPlan: {
+    id: string
+    periodStart: string
+    periodEnd: string
+    status: string
+    incomes: DetailLine[]
+    expenses: DetailLine[]
+  } | null
+  cashPlanSubPlan: {
+    id: string
+    parentHeaderId: string
+    scopeDepartmentCode: string
+    status: string
+    incomes: DetailLine[]
+    expenses: DetailLine[]
+  } | null
+}
+
 function formatDateTime(iso: string) {
   if (!iso) return "—"
   return iso.replace("T", " ").slice(0, 19)
+}
+
+function formatDateOnly(iso: string | null | undefined) {
+  if (!iso) return "—"
+  return iso.slice(0, 10)
 }
 
 export default function ApprovalTodoPage() {
@@ -116,6 +150,8 @@ export default function ApprovalTodoPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [detailRow, setDetailRow] = React.useState<TodoItem | null>(null)
+  const [detailLoading, setDetailLoading] = React.useState(false)
+  const [detailData, setDetailData] = React.useState<ApprovalDetailLite | null>(null)
   const [batchOpen, setBatchOpen] = React.useState(false)
   const [batchComment, setBatchComment] = React.useState("")
   const [batchRunning, setBatchRunning] = React.useState(false)
@@ -233,6 +269,8 @@ export default function ApprovalTodoPage() {
 
   function detailHref(row: TodoItem) {
     if (row.entityType === ENTITY_BUDGET_HEADER) return `/budget/${row.entityId}`
+    if (row.entityType === ENTITY_CASH_PLAN_HEADER)
+      return `/cash-plan/${row.entityId}`
     if (row.entityType === ENTITY_BUDGET_ADJUSTMENT)
       return `/adjustment?id=${encodeURIComponent(row.entityId)}`
     return null
@@ -245,6 +283,38 @@ export default function ApprovalTodoPage() {
     })
     return `/approval/${row.processId}?${qs.toString()}`
   }
+
+  React.useEffect(() => {
+    if (!detailRow) {
+      setDetailData(null)
+      setDetailLoading(false)
+      return
+    }
+    const row = detailRow
+    let cancelled = false
+    async function loadDetail() {
+      setDetailLoading(true)
+      setDetailData(null)
+      try {
+        const qs = new URLSearchParams({
+          entityType: row.entityType,
+          entityId: row.entityId,
+        })
+        const res = await fetch(
+          `/api/approval/${row.processId}/detail?${qs.toString()}`,
+          { headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole) }
+        )
+        const json = (await res.json()) as ApiSuccess<ApprovalDetailLite> | ApiFail
+        if (!cancelled && json.success) setDetailData(json.data)
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    }
+    void loadDetail()
+    return () => {
+      cancelled = true
+    }
+  }, [detailRow, mockOrgId, mockUserId, mockUserRole])
 
   return (
     <div className="container max-w-6xl space-y-6 py-8">
@@ -468,7 +538,7 @@ export default function ApprovalTodoPage() {
       </Card>
 
       <Dialog open={detailRow !== null} onOpenChange={(o) => !o && setDetailRow(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>待办详情</DialogTitle>
             <DialogDescription>
@@ -526,6 +596,211 @@ export default function ApprovalTodoPage() {
               </div>
             </dl>
           ) : null}
+
+          {detailLoading ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2Icon className="size-4 animate-spin" />
+              加载审批内容中…
+            </div>
+          ) : null}
+
+          {detailRow?.entityType === ENTITY_CASH_PLAN_HEADER && detailData?.cashPlan ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">资金计划审批内容</CardTitle>
+                <CardDescription>
+                  {detailData.cashPlan.periodStart.slice(0, 10)} ~{" "}
+                  {detailData.cashPlan.periodEnd.slice(0, 10)} · 状态{" "}
+                  {detailData.cashPlan.status}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div>
+                  <div className="mb-2 font-medium">
+                    流入明细（{detailData.cashPlan.incomes.length}）
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>类别</TableHead>
+                        <TableHead>预计日期</TableHead>
+                        <TableHead className="text-right">金额</TableHead>
+                        <TableHead>备注</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.cashPlan.incomes.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-muted-foreground h-12 text-center"
+                          >
+                            无流入明细
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        detailData.cashPlan.incomes.map((line) => (
+                          <TableRow key={line.id}>
+                            <TableCell>{line.category ?? "—"}</TableCell>
+                            <TableCell className="tabular-nums">
+                              {formatDateOnly(line.expectedDate)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {line.amount ?? "—"}
+                            </TableCell>
+                            <TableCell className="max-w-[220px] truncate">
+                              {line.remark ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div>
+                  <div className="mb-2 font-medium">
+                    流出明细（{detailData.cashPlan.expenses.length}）
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>类别</TableHead>
+                        <TableHead>预计日期</TableHead>
+                        <TableHead className="text-right">金额</TableHead>
+                        <TableHead>备注</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.cashPlan.expenses.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-muted-foreground h-12 text-center"
+                          >
+                            无流出明细
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        detailData.cashPlan.expenses.map((line) => (
+                          <TableRow key={line.id}>
+                            <TableCell>{line.category ?? "—"}</TableCell>
+                            <TableCell className="tabular-nums">
+                              {formatDateOnly(line.expectedDate)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {line.amount ?? "—"}
+                            </TableCell>
+                            <TableCell className="max-w-[220px] truncate">
+                              {line.remark ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {detailRow?.entityType === ENTITY_CASH_PLAN_SUB_PLAN &&
+          detailData?.cashPlanSubPlan ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">资金子计划审批内容</CardTitle>
+                <CardDescription>
+                  部门 {detailData.cashPlanSubPlan.scopeDepartmentCode} · 状态{" "}
+                  {detailData.cashPlanSubPlan.status}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div>
+                  <div className="mb-2 font-medium">
+                    流入明细（{detailData.cashPlanSubPlan.incomes.length}）
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>类别</TableHead>
+                        <TableHead>预计日期</TableHead>
+                        <TableHead className="text-right">金额</TableHead>
+                        <TableHead>备注</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.cashPlanSubPlan.incomes.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-muted-foreground h-12 text-center"
+                          >
+                            无流入明细
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        detailData.cashPlanSubPlan.incomes.map((line) => (
+                          <TableRow key={line.id}>
+                            <TableCell>{line.category ?? "—"}</TableCell>
+                            <TableCell className="tabular-nums">
+                              {formatDateOnly(line.expectedDate)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {line.amount ?? "—"}
+                            </TableCell>
+                            <TableCell className="max-w-[220px] truncate">
+                              {line.remark ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div>
+                  <div className="mb-2 font-medium">
+                    流出明细（{detailData.cashPlanSubPlan.expenses.length}）
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>类别</TableHead>
+                        <TableHead>预计日期</TableHead>
+                        <TableHead className="text-right">金额</TableHead>
+                        <TableHead>备注</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.cashPlanSubPlan.expenses.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-muted-foreground h-12 text-center"
+                          >
+                            无流出明细
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        detailData.cashPlanSubPlan.expenses.map((line) => (
+                          <TableRow key={line.id}>
+                            <TableCell>{line.category ?? "—"}</TableCell>
+                            <TableCell className="tabular-nums">
+                              {formatDateOnly(line.expectedDate)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {line.amount ?? "—"}
+                            </TableCell>
+                            <TableCell className="max-w-[220px] truncate">
+                              {line.remark ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
           <DialogFooter className="gap-2 sm:gap-0">
             {detailRow ? (
               <Button asChild variant="default">
@@ -535,6 +810,14 @@ export default function ApprovalTodoPage() {
             {detailRow && detailHref(detailRow) ? (
               <Button asChild variant="outline">
                 <Link href={detailHref(detailRow)!}>打开单据</Link>
+              </Button>
+            ) : null}
+            {detailRow?.entityType === ENTITY_CASH_PLAN_SUB_PLAN &&
+            detailData?.cashPlanSubPlan?.parentHeaderId ? (
+              <Button asChild variant="outline">
+                <Link href={`/cash-plan/${detailData.cashPlanSubPlan.parentHeaderId}`}>
+                  打开主计划
+                </Link>
               </Button>
             ) : null}
             <Button variant="secondary" onClick={() => setDetailRow(null)}>

@@ -69,6 +69,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
 import { Can } from "@/components/auth/can"
 import { Permission } from "@/lib/auth/permissions"
+import { UserRole } from "@/lib/auth/roles"
 import type {
   CashPlanExcelRowError,
   CashPlanLineImportDto,
@@ -104,25 +105,51 @@ type LineRow = {
 type PlanDetail = {
   id: string
   name: string | null
+  rootDepartmentCode: string | null
   periodStart: string
   periodEnd: string
   status: string
-  openingBalance: string | null
-  safetyWaterLevel: string | null
+  openingBalance?: string | null
+  safetyWaterLevel?: string | null
   approvalProcessId: string | null
   incomes: LineRow[]
   expenses: LineRow[]
 }
 
+type SubPlanDetail = {
+  id: string
+  parentHeaderId: string
+  scopeDepartmentCode: string
+  name: string | null
+  status: string
+  approvalProcessId: string | null
+  incomes: LineRow[]
+  expenses: LineRow[]
+}
+
+type SubPlanAggregate = {
+  approvedSubPlanCount: number
+  totalInflow: string
+  totalOutflow: string
+  netFlow: string
+}
+
+type SubPlanLineDraft = {
+  category: string
+  amount: string
+  expectedDate: string
+  remark: string
+}
+
 type ForecastPayload = {
   planPeriod: { periodStart: string; periodEnd: string }
   computed: {
-    openingBalance: string
+    openingBalance: string | null
     openingBalanceSource: string
     totalInflow: string
     totalOutflow: string
     netFlow: string
-    closingBalance: string
+    closingBalance: string | null
     safetyCheck: {
       safetyWaterLevel: string
       closingBalance: string
@@ -168,6 +195,15 @@ function toIsoDateEndOfDay(dateStr: string) {
   return `${dateStr}T23:59:59.999Z`
 }
 
+function mapLineToSubPlanDraft(line: LineRow): SubPlanLineDraft {
+  return {
+    category: line.category ?? "",
+    amount: line.amount ?? "",
+    expectedDate: isoDateOnly(line.expectedDate),
+    remark: line.remark ?? "",
+  }
+}
+
 type CatOpt = { code: string; name: string }
 
 const CP_CAT_NONE = "__none__"
@@ -182,17 +218,22 @@ function CashPlanCategorySelect({
   value,
   onChange,
   disabled,
+  useFormControl = false,
 }: {
   options: CatOpt[]
   value: string
   onChange: (v: string) => void
   disabled?: boolean
+  useFormControl?: boolean
 }) {
   if (options.length === 0) {
     return (
-      <FormControl>
-        <Input placeholder="选填" disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)} />
-      </FormControl>
+      <Input
+        placeholder="选填"
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
     )
   }
   const trimmed = value ?? ""
@@ -211,11 +252,17 @@ function CashPlanCategorySelect({
         else onChange(v)
       }}
     >
-      <FormControl>
+      {useFormControl ? (
+        <FormControl>
+          <SelectTrigger>
+            <SelectValue placeholder="选填" />
+          </SelectTrigger>
+        </FormControl>
+      ) : (
         <SelectTrigger>
           <SelectValue placeholder="选填" />
         </SelectTrigger>
-      </FormControl>
+      )}
       <SelectContent>
         <SelectItem value={CP_CAT_NONE}>（空）</SelectItem>
         {options.map((o) => (
@@ -269,6 +316,7 @@ export function CashPlanDetailView() {
   const mockOrgId = useBudgetStore((s) => s.mockOrgId)
   const mockUserId = useBudgetStore((s) => s.mockUserId)
   const mockUserRole = useBudgetStore((s) => s.mockUserRole)
+  const isAdmin = mockUserRole === UserRole.ADMIN
 
   const [plan, setPlan] = React.useState<PlanDetail | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -282,6 +330,22 @@ export function CashPlanDetailView() {
 
   const [warnings, setWarnings] = React.useState<WarningRow[]>([])
   const [warningsLoading, setWarningsLoading] = React.useState(false)
+  const [subPlans, setSubPlans] = React.useState<SubPlanDetail[]>([])
+  const [subPlanLoading, setSubPlanLoading] = React.useState(false)
+  const [subPlanCreating, setSubPlanCreating] = React.useState(false)
+  const [subPlanAgg, setSubPlanAgg] = React.useState<SubPlanAggregate | null>(null)
+  const [subPlanEditOpen, setSubPlanEditOpen] = React.useState(false)
+  const [subPlanSaving, setSubPlanSaving] = React.useState(false)
+  const [editingSubPlan, setEditingSubPlan] = React.useState<SubPlanDetail | null>(null)
+  const [subPlanViewOpen, setSubPlanViewOpen] = React.useState(false)
+  const [viewingSubPlan, setViewingSubPlan] = React.useState<SubPlanDetail | null>(null)
+  const [subPlanDraftName, setSubPlanDraftName] = React.useState("")
+  const [subPlanDraftIncomes, setSubPlanDraftIncomes] = React.useState<
+    SubPlanLineDraft[]
+  >([])
+  const [subPlanDraftExpenses, setSubPlanDraftExpenses] = React.useState<
+    SubPlanLineDraft[]
+  >([])
 
   const [lineDialog, setLineDialog] = React.useState<
     | { kind: "income"; mode: "add" }
@@ -318,6 +382,7 @@ export function CashPlanDetailView() {
   const [expenseCategoryOpts, setExpenseCategoryOpts] = React.useState<CatOpt[]>(
     []
   )
+  const [deptOpts, setDeptOpts] = React.useState<CatOpt[]>([])
 
   const incomeCatMap = React.useMemo(
     () => new Map(incomeCategoryOpts.map((o) => [o.code, o.name])),
@@ -388,22 +453,36 @@ export function CashPlanDetailView() {
     }
     ;(async () => {
       try {
-        const [iRes, eRes] = await Promise.all([
+        const [iRes, eRes, dRes] = await Promise.all([
           fetch("/api/master-data/cash-plan-categories?kind=INCOME", {
             headers,
           }),
           fetch("/api/master-data/cash-plan-categories?kind=EXPENSE", {
             headers,
           }),
+          fetch("/api/master-data/departments", { headers }),
         ])
-        const [iJson, eJson] = await Promise.all([iRes.json(), eRes.json()])
+        const [iJson, eJson, dJson] = await Promise.all([
+          iRes.json(),
+          eRes.json(),
+          dRes.json(),
+        ])
         if (cancelled) return
         setIncomeCategoryOpts(mapOpts(iJson))
         setExpenseCategoryOpts(mapOpts(eJson))
+        const d = dJson as
+          | ApiSuccess<{ items: { code: string; name: string }[] }>
+          | ApiFail
+        if (d.success) {
+          setDeptOpts(d.data.items.map((r) => ({ code: r.code, name: r.name })))
+        } else {
+          setDeptOpts([])
+        }
       } catch {
         if (!cancelled) {
           setIncomeCategoryOpts([])
           setExpenseCategoryOpts([])
+          setDeptOpts([])
         }
       }
     })()
@@ -461,9 +540,56 @@ export function CashPlanDetailView() {
     }
   }, [id, mockOrgId, mockUserId, mockUserRole])
 
+  const loadSubPlans = React.useCallback(async () => {
+    if (!id) return
+    setSubPlanLoading(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${id}/sub-plans`, {
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as
+        | ApiSuccess<{ items: SubPlanDetail[] }>
+        | ApiFail
+      if (!json.success) {
+        setSubPlans([])
+        return
+      }
+      setSubPlans(json.data.items)
+    } catch {
+      setSubPlans([])
+    } finally {
+      setSubPlanLoading(false)
+    }
+  }, [id, mockOrgId, mockUserId, mockUserRole])
+
+  const loadSubPlanAggregate = React.useCallback(async () => {
+    if (!id) return
+    try {
+      const res = await fetch(`/api/cash-plan/${id}/sub-plans/aggregate`, {
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<SubPlanAggregate> | ApiFail
+      if (!json.success) {
+        setSubPlanAgg(null)
+        return
+      }
+      setSubPlanAgg(json.data)
+    } catch {
+      setSubPlanAgg(null)
+    }
+  }, [id, mockOrgId, mockUserId, mockUserRole])
+
   React.useEffect(() => {
     if (plan) void loadForecast()
   }, [plan, loadForecast])
+
+  React.useEffect(() => {
+    void loadSubPlans()
+  }, [loadSubPlans])
+
+  React.useEffect(() => {
+    void loadSubPlanAggregate()
+  }, [loadSubPlanAggregate])
 
   function openLineDialog(
     spec:
@@ -562,14 +688,25 @@ export function CashPlanDetailView() {
     setCashExcelBusy(true)
     try {
       const excel = await loadCashPlanExcelModule()
-      const u8 = await excel.writeCashPlanExcelBuffer(plan.incomes, plan.expenses)
+      const approvedSubPlans = subPlans.filter((s) => s.status === "APPROVED")
+      const approvedSubIncomes = approvedSubPlans.flatMap((s) => s.incomes)
+      const approvedSubExpenses = approvedSubPlans.flatMap((s) => s.expenses)
+      const exportIncomes = [...plan.incomes, ...approvedSubIncomes]
+      const exportExpenses = [...plan.expenses, ...approvedSubExpenses]
+      const u8 = await excel.writeCashPlanExcelBuffer(exportIncomes, exportExpenses)
       const blob = new Blob([Uint8Array.from(u8)], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       })
       const name =
         plan.name?.trim().replace(/[/\\?%*:|"<>]/g, "_") || "资金计划"
       triggerDownloadBlob(blob, `${name}_明细.xlsx`)
-      toast.success("已导出")
+      if (approvedSubPlans.length > 0) {
+        toast.success(
+          `已导出（包含主计划明细 + ${approvedSubPlans.length} 个已审批子计划明细）`
+        )
+      } else {
+        toast.success("已导出")
+      }
     } catch {
       toast.error("导出失败")
     } finally {
@@ -849,6 +986,112 @@ export function CashPlanDetailView() {
     }
   }
 
+  async function createSubPlan(deptCode: string) {
+    if (!id || !deptCode) return
+    setSubPlanCreating(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${id}/sub-plans`, {
+        method: "POST",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+        body: JSON.stringify({
+          scopeDepartmentCode: deptCode,
+          name: `${deptCode} 子计划`,
+          incomes: [],
+          expenses: [],
+        }),
+      })
+      const json = (await res.json()) as ApiSuccess<SubPlanDetail> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "创建子计划失败")
+        return
+      }
+      toast.success("已创建子计划")
+      await loadSubPlans()
+      await loadSubPlanAggregate()
+    } catch {
+      toast.error("创建子计划失败")
+    } finally {
+      setSubPlanCreating(false)
+    }
+  }
+
+  async function actionSubPlan(subId: string, action: "submit" | "withdraw" | "delete") {
+    const method = action === "delete" ? "DELETE" : "POST"
+    const endpoint =
+      action === "submit"
+        ? `/api/cash-plan/sub-plan/${subId}/submit`
+        : action === "withdraw"
+          ? `/api/cash-plan/sub-plan/${subId}/withdraw`
+          : `/api/cash-plan/sub-plan/${subId}`
+    const res = await fetch(endpoint, {
+      method,
+      headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+    })
+    const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+    if (!json.success) {
+      toast.error(json.error?.message ?? "操作失败")
+      return
+    }
+    toast.success("操作成功")
+    await loadSubPlans()
+    await loadSubPlanAggregate()
+  }
+
+  function openSubPlanEdit(s: SubPlanDetail) {
+    setEditingSubPlan(s)
+    setSubPlanDraftName(s.name?.trim() || "")
+    setSubPlanDraftIncomes(s.incomes.map(mapLineToSubPlanDraft))
+    setSubPlanDraftExpenses(s.expenses.map(mapLineToSubPlanDraft))
+    setSubPlanEditOpen(true)
+  }
+
+  function openSubPlanView(s: SubPlanDetail) {
+    setViewingSubPlan(s)
+    setSubPlanViewOpen(true)
+  }
+
+  async function saveSubPlanEdit() {
+    if (!editingSubPlan) return
+    setSubPlanSaving(true)
+    try {
+      const normalize = (rows: SubPlanLineDraft[]) =>
+        rows
+          .map((r) => ({
+            category: r.category.trim() || null,
+            amount: r.amount.trim(),
+            expectedDate: r.expectedDate.trim()
+              ? toIsoDateEndOfDay(r.expectedDate.trim())
+              : null,
+            remark: r.remark.trim() || null,
+          }))
+          .filter((r) => r.amount !== "")
+      const res = await fetch(`/api/cash-plan/sub-plan/${editingSubPlan.id}`, {
+        method: "PUT",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+        body: JSON.stringify({
+          name: subPlanDraftName.trim() || null,
+          scopeDepartmentCode: editingSubPlan.scopeDepartmentCode,
+          incomes: normalize(subPlanDraftIncomes),
+          expenses: normalize(subPlanDraftExpenses),
+        }),
+      })
+      const json = (await res.json()) as ApiSuccess<SubPlanDetail> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "保存子计划失败")
+        return
+      }
+      toast.success("子计划已保存")
+      setSubPlanEditOpen(false)
+      setEditingSubPlan(null)
+      await loadSubPlans()
+      await loadSubPlanAggregate()
+    } catch {
+      toast.error("保存子计划失败")
+    } finally {
+      setSubPlanSaving(false)
+    }
+  }
+
   if (!id) {
     return (
       <div className="p-6">
@@ -882,6 +1125,9 @@ export function CashPlanDetailView() {
               <Badge variant="outline" className="ml-1 align-middle">
                 {STATUS_LABEL[plan.status] ?? plan.status}
               </Badge>
+              <span className="ml-2">
+                范围：{plan.rootDepartmentCode ?? "全组织"}
+              </span>
             </p>
           ) : null}
         </div>
@@ -984,6 +1230,7 @@ export function CashPlanDetailView() {
         <Tabs defaultValue="basic" className="gap-4">
           <TabsList className="flex flex-wrap h-auto min-h-10">
             <TabsTrigger value="basic">基本信息</TabsTrigger>
+            <TabsTrigger value="subplans">月度子计划</TabsTrigger>
             <TabsTrigger value="inflow">资金流入</TabsTrigger>
             <TabsTrigger value="outflow">资金流出</TabsTrigger>
             <TabsTrigger value="forecast">现金流预测</TabsTrigger>
@@ -1061,12 +1308,164 @@ export function CashPlanDetailView() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="subplans">
+            <Card>
+              <CardHeader>
+                <CardTitle>月度子计划</CardTitle>
+                <CardDescription>
+                  子计划部门需在主计划范围内；子计划审批通过后并入主计划汇总。
+                </CardDescription>
+                {!isAdmin ? (
+                  <p className="text-muted-foreground text-xs">
+                    当前仅展示您本人发起的子计划。
+                  </p>
+                ) : null}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-2 rounded-md border p-3 text-sm sm:grid-cols-4">
+                  <div>
+                    <div className="text-muted-foreground">已审批子计划</div>
+                    <div className="font-medium tabular-nums">
+                      {subPlanAgg?.approvedSubPlanCount ?? 0}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">汇总流入</div>
+                    <div className="font-medium tabular-nums">
+                      {subPlanAgg?.totalInflow ?? "0"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">汇总流出</div>
+                    <div className="font-medium tabular-nums">
+                      {subPlanAgg?.totalOutflow ?? "0"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">净流量</div>
+                    <div className="font-medium tabular-nums">
+                      {subPlanAgg?.netFlow ?? "0"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    onValueChange={(v) => {
+                      void createSubPlan(v)
+                    }}
+                    disabled={!editable || subPlanCreating || deptOpts.length === 0}
+                  >
+                    <SelectTrigger className="w-[320px]">
+                      <SelectValue placeholder="选择部门并创建子计划" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {deptOpts.map((d) => (
+                        <SelectItem key={d.code} value={d.code}>
+                          {d.code} · {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {subPlanCreating ? (
+                    <Loader2Icon className="size-4 animate-spin" />
+                  ) : null}
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>名称</TableHead>
+                      <TableHead>部门</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {subPlanLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="h-14 text-center">
+                          <Loader2Icon className="mx-auto size-4 animate-spin" />
+                        </TableCell>
+                      </TableRow>
+                    ) : subPlans.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-muted-foreground h-14 text-center"
+                        >
+                          暂无子计划
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      subPlans.map((s) => (
+                        <TableRow key={s.id}>
+                          <TableCell>{s.name?.trim() || "未命名子计划"}</TableCell>
+                          <TableCell>{s.scopeDepartmentCode}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{s.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openSubPlanView(s)}
+                              >
+                                详情
+                              </Button>
+                              {s.status === "DRAFT" ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openSubPlanEdit(s)}
+                                  >
+                                    编辑
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => void actionSubPlan(s.id, "submit")}
+                                  >
+                                    提交
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => void actionSubPlan(s.id, "delete")}
+                                  >
+                                    删除
+                                  </Button>
+                                </>
+                              ) : null}
+                              {s.status === "SUBMITTED" ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void actionSubPlan(s.id, "withdraw")}
+                                >
+                                  撤回
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="inflow">
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
                 <div>
                   <CardTitle>资金流入明细</CardTitle>
-                  <CardDescription>编制中可增删改</CardDescription>
+                  <CardDescription>
+                    编制中可增删改（含已审批子计划汇总：{subPlanAgg?.totalInflow ?? "0"}）
+                  </CardDescription>
                 </div>
                 {editable ? (
                   <Button
@@ -1079,6 +1478,16 @@ export function CashPlanDetailView() {
                   </Button>
                 ) : null}
               </CardHeader>
+              {subPlanAgg ? (
+                <CardContent className="border-b py-3 text-sm">
+                  <div className="text-muted-foreground">
+                    已审批子计划汇总流入：
+                    <span className="text-foreground ml-1 tabular-nums font-medium">
+                      {subPlanAgg.totalInflow}
+                    </span>
+                  </div>
+                </CardContent>
+              ) : null}
               <CardContent className="px-0">
                 <Table>
                   <TableHeader>
@@ -1160,7 +1569,9 @@ export function CashPlanDetailView() {
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
                 <div>
                   <CardTitle>资金流出明细</CardTitle>
-                  <CardDescription>编制中可增删改</CardDescription>
+                  <CardDescription>
+                    编制中可增删改（含已审批子计划汇总：{subPlanAgg?.totalOutflow ?? "0"}）
+                  </CardDescription>
                 </div>
                 {editable ? (
                   <Button
@@ -1175,6 +1586,16 @@ export function CashPlanDetailView() {
                   </Button>
                 ) : null}
               </CardHeader>
+              {subPlanAgg ? (
+                <CardContent className="border-b py-3 text-sm">
+                  <div className="text-muted-foreground">
+                    已审批子计划汇总流出：
+                    <span className="text-foreground ml-1 tabular-nums font-medium">
+                      {subPlanAgg.totalOutflow}
+                    </span>
+                  </div>
+                </CardContent>
+              ) : null}
               <CardContent className="px-0">
                 <Table>
                   <TableHeader>
@@ -1730,6 +2151,368 @@ export function CashPlanDetailView() {
       </Dialog>
 
       <Dialog
+        open={subPlanViewOpen}
+        onOpenChange={(o) => {
+          setSubPlanViewOpen(o)
+          if (!o) setViewingSubPlan(null)
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>子计划详情</DialogTitle>
+            <DialogDescription>
+              {viewingSubPlan?.name?.trim() || "未命名子计划"} · 部门{" "}
+              {viewingSubPlan?.scopeDepartmentCode ?? "—"} · 状态{" "}
+              {viewingSubPlan?.status ?? "—"}
+            </DialogDescription>
+          </DialogHeader>
+          {viewingSubPlan ? (
+            <div className="space-y-4">
+              <div>
+                <div className="mb-2 text-sm font-medium">
+                  流入明细（{viewingSubPlan.incomes.length}）
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>类别</TableHead>
+                      <TableHead>预计日期</TableHead>
+                      <TableHead className="text-right">金额</TableHead>
+                      <TableHead>备注</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {viewingSubPlan.incomes.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-muted-foreground h-12 text-center"
+                        >
+                          无流入明细
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      viewingSubPlan.incomes.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{categoryDisplay(r.category, incomeCatMap)}</TableCell>
+                          <TableCell className="tabular-nums text-sm">
+                            {isoDateOnly(r.expectedDate) || "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.amount ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
+                            {r.remark ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-medium">
+                  流出明细（{viewingSubPlan.expenses.length}）
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>类别</TableHead>
+                      <TableHead>预计日期</TableHead>
+                      <TableHead className="text-right">金额</TableHead>
+                      <TableHead>备注</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {viewingSubPlan.expenses.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-muted-foreground h-12 text-center"
+                        >
+                          无流出明细
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      viewingSubPlan.expenses.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{categoryDisplay(r.category, expenseCatMap)}</TableCell>
+                          <TableCell className="tabular-nums text-sm">
+                            {isoDateOnly(r.expectedDate) || "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.amount ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
+                            {r.remark ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setSubPlanViewOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={subPlanEditOpen}
+        onOpenChange={(o) => {
+          setSubPlanEditOpen(o)
+          if (!o) setEditingSubPlan(null)
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>编辑子计划</DialogTitle>
+            <DialogDescription>
+              仅草稿子计划可编辑；金额必须大于 0，日期必须在主计划期间内。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label>名称</Label>
+              <Input
+                value={subPlanDraftName}
+                onChange={(e) => setSubPlanDraftName(e.target.value)}
+                placeholder="子计划名称（可选）"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>流入明细</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setSubPlanDraftIncomes((prev) => [
+                      ...prev,
+                      { category: "", amount: "", expectedDate: "", remark: "" },
+                    ])
+                  }
+                >
+                  新增流入行
+                </Button>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类别</TableHead>
+                    <TableHead>金额</TableHead>
+                    <TableHead>日期</TableHead>
+                    <TableHead>备注</TableHead>
+                    <TableHead className="w-[80px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {subPlanDraftIncomes.map((r, idx) => (
+                    <TableRow key={`in-${idx}`}>
+                      <TableCell>
+                        <CashPlanCategorySelect
+                          options={incomeCategoryOpts}
+                          value={r.category}
+                          onChange={(v) =>
+                            setSubPlanDraftIncomes((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, category: v } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.amount}
+                          onChange={(e) =>
+                            setSubPlanDraftIncomes((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, amount: e.target.value } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="date"
+                          value={r.expectedDate}
+                          onChange={(e) =>
+                            setSubPlanDraftIncomes((prev) =>
+                              prev.map((x, i) =>
+                                i === idx
+                                  ? { ...x, expectedDate: e.target.value }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.remark}
+                          onChange={(e) =>
+                            setSubPlanDraftIncomes((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, remark: e.target.value } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            setSubPlanDraftIncomes((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            )
+                          }
+                        >
+                          删
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>流出明细</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setSubPlanDraftExpenses((prev) => [
+                      ...prev,
+                      { category: "", amount: "", expectedDate: "", remark: "" },
+                    ])
+                  }
+                >
+                  新增流出行
+                </Button>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类别</TableHead>
+                    <TableHead>金额</TableHead>
+                    <TableHead>日期</TableHead>
+                    <TableHead>备注</TableHead>
+                    <TableHead className="w-[80px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {subPlanDraftExpenses.map((r, idx) => (
+                    <TableRow key={`out-${idx}`}>
+                      <TableCell>
+                        <CashPlanCategorySelect
+                          options={expenseCategoryOpts}
+                          value={r.category}
+                          onChange={(v) =>
+                            setSubPlanDraftExpenses((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, category: v } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.amount}
+                          onChange={(e) =>
+                            setSubPlanDraftExpenses((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, amount: e.target.value } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="date"
+                          value={r.expectedDate}
+                          onChange={(e) =>
+                            setSubPlanDraftExpenses((prev) =>
+                              prev.map((x, i) =>
+                                i === idx
+                                  ? { ...x, expectedDate: e.target.value }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.remark}
+                          onChange={(e) =>
+                            setSubPlanDraftExpenses((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, remark: e.target.value } : x
+                              )
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            setSubPlanDraftExpenses((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            )
+                          }
+                        >
+                          删
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSubPlanEditOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={subPlanSaving}
+              onClick={() => void saveSubPlanEdit()}
+            >
+              {subPlanSaving ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={lineDialog !== null}
         onOpenChange={(o) => {
           if (!o) setLineDialog(null)
@@ -1760,6 +2543,7 @@ export function CashPlanDetailView() {
                       value={field.value ?? ""}
                       onChange={field.onChange}
                       disabled={!editable}
+                      useFormControl
                     />
                     <FormMessage />
                   </FormItem>

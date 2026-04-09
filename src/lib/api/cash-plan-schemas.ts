@@ -32,6 +32,7 @@ export const cashPlanCreateBodySchema = z.object({
   periodStart: z.string().datetime({ offset: true }),
   periodEnd: z.string().datetime({ offset: true }),
   approvalProcessId: z.string().min(1).max(64).optional().nullable(),
+  rootDepartmentCode: z.string().trim().max(64).optional().nullable(),
 })
 
 export const cashPlanUpdateBodySchema = z
@@ -40,6 +41,7 @@ export const cashPlanUpdateBodySchema = z
     periodStart: z.string().datetime({ offset: true }).optional(),
     periodEnd: z.string().datetime({ offset: true }).optional(),
     approvalProcessId: z.string().min(1).max(64).optional().nullable(),
+    rootDepartmentCode: z.string().trim().max(64).optional().nullable(),
     openingBalance: z.union([money, z.null()]).optional(),
     safetyWaterLevel: z.union([money, z.null()]).optional(),
   })
@@ -79,4 +81,33 @@ export const cashPlanWarningsQuerySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+})
+
+export const cashPlanSubPlanCreateSchema = z.object({
+  scopeDepartmentCode: z.string().trim().min(1).max(64),
+  name: z.string().trim().max(200).optional().nullable(),
+  approvalProcessId: z.string().trim().max(64).optional().nullable(),
+  incomes: z.array(cashPlanLineBodySchema).default([]),
+  expenses: z.array(cashPlanLineBodySchema).default([]),
+})
+
+export const cashPlanSubPlanUpdateSchema = z
+  .object({
+    scopeDepartmentCode: z.string().trim().min(1).max(64).optional(),
+    name: z.string().trim().max(200).optional().nullable(),
+    approvalProcessId: z.string().trim().max(64).optional().nullable(),
+    incomes: z.array(cashPlanLineBodySchema).optional(),
+    expenses: z.array(cashPlanLineBodySchema).optional(),
+  })
+  .refine((o) => Object.values(o).some((v) => v !== undefined), {
+    message: "至少需要提供一个可更新字段",
+  })
+
+export const cashPlanMonthlyGenerateBodySchema = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month 必须为 YYYY-MM"),
+  name: z.string().trim().max(200).optional().nullable(),
+  approvalProcessId: z.string().min(1).max(64).optional().nullable(),
+  rootDepartmentCode: z.string().trim().min(1, "必须选择顶级部门").max(64),
 })

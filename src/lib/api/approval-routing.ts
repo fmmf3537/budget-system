@@ -3,6 +3,7 @@ import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
   ENTITY_CASH_PLAN_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import type { Prisma } from "@/generated/prisma/client"
 
@@ -66,6 +67,27 @@ export async function getEntityTotalAmountForRouting(
       }),
       db.cashPlanExpense.aggregate({
         where: { headerId: entityId },
+        _sum: { amount: true },
+      }),
+    ])
+    const inc = Number(incomeAgg._sum.amount ?? 0)
+    const exp = Number(expenseAgg._sum.amount ?? 0)
+    if (!Number.isFinite(inc) || !Number.isFinite(exp)) return 0
+    return inc + exp
+  }
+  if (entityType === ENTITY_CASH_PLAN_SUB_PLAN) {
+    const s = await db.cashPlanSubPlan.findFirst({
+      where: { id: entityId, organizationId },
+      select: { id: true },
+    })
+    if (!s) return null
+    const [incomeAgg, expenseAgg] = await Promise.all([
+      db.cashPlanSubPlanIncome.aggregate({
+        where: { subPlanId: entityId },
+        _sum: { amount: true },
+      }),
+      db.cashPlanSubPlanExpense.aggregate({
+        where: { subPlanId: entityId },
         _sum: { amount: true },
       }),
     ])

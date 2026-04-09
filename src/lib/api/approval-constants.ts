@@ -2,3 +2,4 @@
 export const ENTITY_BUDGET_HEADER = "BudgetHeader"
 export const ENTITY_BUDGET_ADJUSTMENT = "BudgetAdjustment"
 export const ENTITY_CASH_PLAN_HEADER = "CashPlanHeader"
+export const ENTITY_CASH_PLAN_SUB_PLAN = "CashPlanSubPlan"

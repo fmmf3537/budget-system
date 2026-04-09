@@ -32,12 +32,6 @@ export const MAIN_NAV: MainNavItem[] = [
     permission: Permission.BUDGET_VIEW,
   },
   {
-    href: "/approval/todo",
-    label: "预算审批",
-    icon: Gavel,
-    permission: Permission.APPROVAL_VIEW,
-  },
-  {
     href: "/adjustment",
     label: "预算调整",
     icon: SlidersHorizontal,
@@ -48,6 +42,12 @@ export const MAIN_NAV: MainNavItem[] = [
     label: "资金计划",
     icon: Wallet,
     permission: Permission.CASH_PLAN_VIEW,
+  },
+  {
+    href: "/approval/todo",
+    label: "审批",
+    icon: Gavel,
+    permission: Permission.APPROVAL_VIEW,
   },
 ]
 

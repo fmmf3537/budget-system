@@ -4,12 +4,14 @@ import {
   ApprovalAction,
   BudgetStatus,
   CashPlanStatus,
+  CashPlanSubPlanStatus,
 } from "@/generated/prisma/enums"
 import type { Prisma } from "@/generated/prisma/client"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
   ENTITY_CASH_PLAN_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import {
   getEntityTotalAmountForRouting,
@@ -268,6 +270,30 @@ async function finalizeCashPlanRejectedTx(
   })
 }
 
+async function finalizeCashPlanSubPlanApprovedTx(
+  tx: Prisma.TransactionClient,
+  entityType: string,
+  entityId: string
+) {
+  if (entityType !== ENTITY_CASH_PLAN_SUB_PLAN) return
+  await tx.cashPlanSubPlan.updateMany({
+    where: { id: entityId, status: CashPlanSubPlanStatus.SUBMITTED },
+    data: { status: CashPlanSubPlanStatus.APPROVED },
+  })
+}
+
+async function finalizeCashPlanSubPlanRejectedTx(
+  tx: Prisma.TransactionClient,
+  entityType: string,
+  entityId: string
+) {
+  if (entityType !== ENTITY_CASH_PLAN_SUB_PLAN) return
+  await tx.cashPlanSubPlan.updateMany({
+    where: { id: entityId, status: CashPlanSubPlanStatus.SUBMITTED },
+    data: { status: CashPlanSubPlanStatus.DRAFT },
+  })
+}
+
 export async function runApprove(params: {
   processId: string
   organizationId: string
@@ -349,6 +375,7 @@ export async function runApprove(params: {
     await finalizeBudgetApprovedTx(tx, entityType, entityId)
     await finalizeAdjustmentApprovedTx(tx, entityType, entityId)
     await finalizeCashPlanApprovedTx(tx, entityType, entityId)
+    await finalizeCashPlanSubPlanApprovedTx(tx, entityType, entityId)
     return { ok: true as const, completed: true as const, recordId: record.id }
   })
 }
@@ -470,6 +497,7 @@ export async function runReject(params: {
     await finalizeBudgetRejectedTx(tx, entityType, entityId)
     await finalizeAdjustmentRejectedTx(tx, entityType, entityId)
     await finalizeCashPlanRejectedTx(tx, entityType, entityId)
+    await finalizeCashPlanSubPlanRejectedTx(tx, entityType, entityId)
     return {
       ok: true as const,
       recordId: record.id,

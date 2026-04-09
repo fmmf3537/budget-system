@@ -65,6 +65,13 @@ enum CashPlanStatus {
   CLOSED
 }
 
+enum CashPlanSubPlanStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
 enum WarningSeverity {
   INFO
   LOW
@@ -109,6 +116,7 @@ model Organization {
   approvalProcesses  ApprovalProcess[]
   budgetAdjustments  BudgetAdjustment[]
   cashPlanHeaders    CashPlanHeader[]
+  cashPlanSubPlans   CashPlanSubPlan[]
   cashFlowForecasts  CashFlowForecast[]
   warningRecords     WarningRecord[]
 
@@ -156,6 +164,7 @@ model User {
   budgetHeadersUpdated   BudgetHeader[]      @relation("BudgetHeaderUpdatedBy")
   budgetAdjustments      BudgetAdjustment[]  @relation("BudgetAdjustmentRequester")
   cashPlansCreated       CashPlanHeader[]    @relation("CashPlanCreatedBy")
+  cashPlanSubPlansCreated CashPlanSubPlan[]  @relation("CashPlanSubPlanCreatedBy")
   approvalRecords        ApprovalRecord[]    @relation("ApprovalRecordActor")
   approvalNodes          ApprovalNode[]      @relation("ApprovalNodeApprover")
   adjustmentHistories    AdjustmentHistory[] @relation("AdjustmentHistoryOperator")
@@ -336,6 +345,7 @@ model ApprovalProcess {
   budgetHeaders  BudgetHeader[]
   adjustments    BudgetAdjustment[] @relation("AdjustmentApprovalProcess")
   cashPlans      CashPlanHeader[]   @relation("CashPlanApprovalProcess")
+  cashPlanSubPlans CashPlanSubPlan[]
 
   @@index([organizationId, bizType])
   @@map("approval_process")
@@ -470,6 +480,8 @@ model CashPlanHeader {
   id                String         @id @default(cuid())
   organizationId    String
   name              String?
+  /// 主计划范围：可选顶级部门编码；null 表示全组织
+  rootDepartmentCode String?
   periodStart       DateTime
   periodEnd         DateTime
   status            CashPlanStatus @default(DRAFT)
@@ -487,10 +499,67 @@ model CashPlanHeader {
   approvalProcess ApprovalProcess? @relation("CashPlanApprovalProcess", fields: [approvalProcessId], references: [id], onDelete: SetNull)
   incomes         CashPlanIncome[]
   expenses        CashPlanExpense[]
+  subPlans        CashPlanSubPlan[]
 
   @@index([organizationId])
   @@index([periodStart, periodEnd])
   @@map("cash_plan_header")
+}
+
+model CashPlanSubPlan {
+  id                String               @id @default(cuid())
+  organizationId    String
+  parentHeaderId    String
+  scopeDepartmentCode String
+  name              String?
+  status            CashPlanSubPlanStatus @default(DRAFT)
+  createdById       String?
+  approvalProcessId String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parentHeader    CashPlanHeader   @relation(fields: [parentHeaderId], references: [id], onDelete: Cascade)
+  createdBy       User?            @relation("CashPlanSubPlanCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvalProcess ApprovalProcess? @relation(fields: [approvalProcessId], references: [id], onDelete: SetNull)
+  incomes         CashPlanSubPlanIncome[]
+  expenses        CashPlanSubPlanExpense[]
+
+  @@index([organizationId, parentHeaderId])
+  @@index([organizationId, scopeDepartmentCode])
+  @@map("cash_plan_sub_plan")
+}
+
+model CashPlanSubPlanIncome {
+  id           String    @id @default(cuid())
+  subPlanId    String
+  category     String?
+  amount       Decimal   @db.Decimal(18, 2)
+  expectedDate DateTime?
+  remark       String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  subPlan CashPlanSubPlan @relation(fields: [subPlanId], references: [id], onDelete: Cascade)
+
+  @@index([subPlanId])
+  @@map("cash_plan_sub_plan_income")
+}
+
+model CashPlanSubPlanExpense {
+  id           String    @id @default(cuid())
+  subPlanId    String
+  category     String?
+  amount       Decimal   @db.Decimal(18, 2)
+  expectedDate DateTime?
+  remark       String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  subPlan CashPlanSubPlan @relation(fields: [subPlanId], references: [id], onDelete: Cascade)
+
+  @@index([subPlanId])
+  @@map("cash_plan_sub_plan_expense")
 }
 
 model CashPlanIncome {

@@ -28,7 +28,12 @@ import {
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher"
 import { ThemeToggle } from "@/components/theme/theme-toggle"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
-import { ROLE_LABEL, USER_ROLE_VALUES, type UserRoleType } from "@/lib/auth/roles"
+import {
+  ROLE_LABEL,
+  USER_ROLE_VALUES,
+  UserRole,
+  type UserRoleType,
+} from "@/lib/auth/roles"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBudgetStore } from "@/stores/budget-store"
 
@@ -200,11 +205,13 @@ export function Header() {
                 ) : null}
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/cash-plan/dashboard" className="cursor-pointer">
-                现金流看板
-              </Link>
-            </DropdownMenuItem>
+            {mockUserRole === UserRole.ADMIN ? (
+              <DropdownMenuItem asChild>
+                <Link href="/cash-plan/dashboard" className="cursor-pointer">
+                  现金流看板
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
 

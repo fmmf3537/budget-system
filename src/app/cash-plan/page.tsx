@@ -12,6 +12,15 @@ import {
   Trash2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
 
 import { ApprovalBizType } from "@/generated/prisma/enums"
 import { CashPlanStatus } from "@/generated/prisma/enums"
@@ -62,6 +71,7 @@ import {
 import { Can } from "@/components/auth/can"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
 import { Permission } from "@/lib/auth/permissions"
+import { UserRole } from "@/lib/auth/roles"
 import { useBudgetStore } from "@/stores/budget-store"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
@@ -101,6 +111,7 @@ function statusBadgeVariant(
 type ListItem = {
   id: string
   name: string | null
+  rootDepartmentCode: string | null
   periodStart: string
   periodEnd: string
   status: string
@@ -116,10 +127,47 @@ type ApiFail = {
   error: { message: string }
 }
 
+type MonthlyBoardPayload = {
+  overview: {
+    matchedMainPlanCount: number
+    matchedSubPlanCount: number
+    mainSubmittedInflow: string
+    mainSubmittedOutflow: string
+    subSubmittedInflow: string
+    subSubmittedOutflow: string
+    totalInflow: string
+    totalOutflow: string
+    netFlow: string
+  }
+  trend: Array<{
+    key: string
+    label: string
+    inflow: string
+    outflow: string
+    net: string
+  }>
+  note: string
+}
+
+type MonthlyBoardScope =
+  | "submitted_only"
+  | "submitted_and_approved"
+  | "approved_only"
+type MonthlyBoardDepartmentScope = "__org__" | string
+
 function formatPeriod(isoStart: string, isoEnd: string) {
   const a = isoStart.slice(0, 10)
   const b = isoEnd.slice(0, 10)
   return `${a} ~ ${b}`
+}
+
+function fmtMoney(v: string) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return v
+  return n.toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }
 
 const NONE = "__none__"
@@ -127,17 +175,12 @@ const NONE = "__none__"
 const createPlanSchema = z
   .object({
     name: z.string().max(200).optional(),
-    periodStart: z.string().min(1, "请选择开始日期"),
-    periodEnd: z.string().min(1, "请选择结束日期"),
+    month: z
+      .string()
+      .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "请选择月份"),
     approvalProcessId: z.string().optional(),
+    rootDepartmentCode: z.string().min(1, "请选择顶级部门"),
   })
-  .refine(
-    (d) => {
-      if (!d.periodStart || !d.periodEnd) return true
-      return d.periodStart <= d.periodEnd
-    },
-    { message: "结束日期不能早于开始日期", path: ["periodEnd"] }
-  )
 
 type CreatePlanValues = z.infer<typeof createPlanSchema>
 
@@ -146,6 +189,8 @@ export default function CashPlanListPage() {
   const mockOrgId = useBudgetStore((s) => s.mockOrgId)
   const mockUserId = useBudgetStore((s) => s.mockUserId)
   const mockUserRole = useBudgetStore((s) => s.mockUserRole)
+  const canGenerateMonthly = mockUserRole === UserRole.ADMIN
+  const canViewBoard = mockUserRole === UserRole.ADMIN
 
   const [items, setItems] = React.useState<ListItem[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -155,6 +200,11 @@ export default function CashPlanListPage() {
   const [totalPages, setTotalPages] = React.useState(1)
   const [total, setTotal] = React.useState(0)
   const [statusFilter, setStatusFilter] = React.useState<string>("all")
+  const [board, setBoard] = React.useState<MonthlyBoardPayload | null>(null)
+  const [boardLoading, setBoardLoading] = React.useState(false)
+  const [boardScope, setBoardScope] = React.useState<MonthlyBoardScope>("submitted_only")
+  const [boardDepartmentScope, setBoardDepartmentScope] =
+    React.useState<MonthlyBoardDepartmentScope>("__org__")
 
   const [createOpen, setCreateOpen] = React.useState(false)
   const [createSubmitting, setCreateSubmitting] = React.useState(false)
@@ -164,14 +214,53 @@ export default function CashPlanListPage() {
     { id: string; name: string; bizType: string; isActive: boolean }[]
   >([])
   const [processesLoading, setProcessesLoading] = React.useState(false)
+  const [topDepartments, setTopDepartments] = React.useState<
+    { code: string; name: string }[]
+  >([])
+
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const depRes = await fetch("/api/master-data/departments", {
+          headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+        })
+        const depJson = (await depRes.json()) as
+          | ApiSuccess<{
+              items: {
+                parentId: string | null
+                code: string
+                name: string
+                isActive: boolean
+              }[]
+            }>
+          | ApiFail
+        if (cancelled) return
+        if (!depJson.success) {
+          setTopDepartments([])
+          return
+        }
+        setTopDepartments(
+          depJson.data.items
+            .filter((d) => d.isActive && d.parentId == null)
+            .map((d) => ({ code: d.code, name: d.name }))
+        )
+      } catch {
+        if (!cancelled) setTopDepartments([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mockOrgId, mockUserId, mockUserRole])
 
   const createForm = useForm<CreatePlanValues>({
     resolver: zodResolver(createPlanSchema),
     defaultValues: {
       name: "",
-      periodStart: "",
-      periodEnd: "",
+      month: new Date().toISOString().slice(0, 7),
       approvalProcessId: NONE,
+      rootDepartmentCode: "",
     },
   })
 
@@ -220,16 +309,52 @@ export default function CashPlanListPage() {
     void fetchList()
   }, [fetchList])
 
+  const fetchBoard = React.useCallback(async () => {
+    setBoardLoading(true)
+    try {
+      const res = await fetch(
+        `/api/cash-plan/monthly-board?months=6&scope=${boardScope}&departmentScope=${encodeURIComponent(
+          boardDepartmentScope
+        )}`,
+        {
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+        }
+      )
+      const json = (await res.json()) as ApiSuccess<MonthlyBoardPayload> | ApiFail
+      if (!json.success) {
+        setBoard(null)
+        return
+      }
+      setBoard(json.data)
+    } catch {
+      setBoard(null)
+    } finally {
+      setBoardLoading(false)
+    }
+  }, [mockOrgId, mockUserId, mockUserRole, boardScope, boardDepartmentScope])
+
+  React.useEffect(() => {
+    void fetchBoard()
+  }, [fetchBoard])
+
   React.useEffect(() => {
     if (!createOpen) return
     let cancelled = false
     ;(async () => {
       setProcessesLoading(true)
       try {
-        const res = await fetch("/api/settings/approval-flow", {
-          headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
-        })
-        const json = (await res.json()) as
+        const [flowRes, depRes] = await Promise.all([
+          fetch("/api/settings/approval-flow", {
+            headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+          }),
+          fetch("/api/master-data/departments", {
+            headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+          }),
+        ])
+        const [json, depJson] = (await Promise.all([
+          flowRes.json(),
+          depRes.json(),
+        ])) as [
           | ApiSuccess<{
               items: {
                 id: string
@@ -238,19 +363,40 @@ export default function CashPlanListPage() {
                 isActive: boolean
               }[]
             }>
-          | ApiFail
+          | ApiFail,
+          ApiSuccess<{
+            items: {
+              parentId: string | null
+              code: string
+              name: string
+              isActive: boolean
+            }[]
+          }> | ApiFail,
+        ]
         if (cancelled) return
         if (!json.success) {
           setProcesses([])
-          return
-        }
-        setProcesses(
-          json.data.items.filter(
-            (p) => p.bizType === ApprovalBizType.CASH_PLAN && p.isActive
+        } else {
+          setProcesses(
+            json.data.items.filter(
+              (p) => p.bizType === ApprovalBizType.CASH_PLAN && p.isActive
+            )
           )
-        )
+        }
+        if (!depJson.success) {
+          setTopDepartments([])
+        } else {
+          setTopDepartments(
+            depJson.data.items
+              .filter((d) => d.isActive && d.parentId == null)
+              .map((d) => ({ code: d.code, name: d.name }))
+          )
+        }
       } catch {
-        if (!cancelled) setProcesses([])
+        if (!cancelled) {
+          setProcesses([])
+          setTopDepartments([])
+        }
       } finally {
         if (!cancelled) setProcessesLoading(false)
       }
@@ -263,21 +409,24 @@ export default function CashPlanListPage() {
   const onCreate = createForm.handleSubmit(async (values) => {
     setCreateSubmitting(true)
     try {
-      const ps = `${values.periodStart}T00:00:00.000Z`
-      const pe = `${values.periodEnd}T00:00:00.000Z`
       const approvalProcessId =
         values.approvalProcessId &&
         values.approvalProcessId !== NONE &&
         values.approvalProcessId.trim()
           ? values.approvalProcessId.trim()
           : null
+      const rootDepartmentCode =
+        values.rootDepartmentCode &&
+        values.rootDepartmentCode.trim()
+          ? values.rootDepartmentCode.trim()
+          : ""
       const body = {
         name: values.name?.trim() ? values.name.trim() : null,
-        periodStart: ps,
-        periodEnd: pe,
+        month: values.month,
         approvalProcessId,
+        rootDepartmentCode,
       }
-      const res = await fetch("/api/cash-plan", {
+      const res = await fetch("/api/cash-plan/monthly/generate", {
         method: "POST",
         headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
         body: JSON.stringify(body),
@@ -291,9 +440,9 @@ export default function CashPlanListPage() {
       setCreateOpen(false)
       createForm.reset({
         name: "",
-        periodStart: "",
-        periodEnd: "",
+        month: new Date().toISOString().slice(0, 7),
         approvalProcessId: NONE,
+        rootDepartmentCode: "",
       })
       router.push(`/cash-plan/${json.data.id}`)
     } catch {
@@ -342,13 +491,19 @@ export default function CashPlanListPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild type="button" variant="outline">
-            <Link href="/cash-plan/dashboard">现金流看板</Link>
-          </Button>
+          {canViewBoard ? (
+            <Button asChild type="button" variant="outline">
+              <Link href="/cash-plan/dashboard">现金流看板</Link>
+            </Button>
+          ) : null}
           <Can permission={Permission.CASH_PLAN_EDIT}>
-            <Button type="button" onClick={() => setCreateOpen(true)}>
+            <Button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              disabled={!canGenerateMonthly}
+            >
               <PlusIcon className="mr-2 size-4" />
-              创建新计划
+              生成月度主计划
             </Button>
           </Can>
         </div>
@@ -359,6 +514,115 @@ export default function CashPlanListPage() {
           <AlertTitle>加载失败</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      ) : null}
+
+      {canViewBoard ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>提交中资金看板</CardTitle>
+          <CardDescription>
+            主计划与子计划状态为「已提交」的流入/流出图表汇总
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-sm">统计口径</Label>
+            <Select
+              value={boardScope}
+              onValueChange={(v) => setBoardScope(v as MonthlyBoardScope)}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="submitted_only">仅已提交</SelectItem>
+                <SelectItem value="submitted_and_approved">已提交+已审批</SelectItem>
+                <SelectItem value="approved_only">仅已审批</SelectItem>
+              </SelectContent>
+            </Select>
+            <Label className="text-sm">部门范围</Label>
+            <Select
+              value={boardDepartmentScope}
+              onValueChange={(v) => setBoardDepartmentScope(v)}
+            >
+              <SelectTrigger className="w-[240px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__org__">组织本身</SelectItem>
+                {topDepartments.map((d) => (
+                  <SelectItem key={d.code} value={d.code}>
+                    {d.code} · {d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {boardLoading && !board ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2Icon className="size-4 animate-spin" />
+              看板加载中…
+            </div>
+          ) : board ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+                <div className="rounded-md border px-2.5 py-2">
+                  <div className="text-muted-foreground text-[11px] leading-4">总流入</div>
+                  <div className="tabular-nums text-base font-semibold text-emerald-600">
+                    {fmtMoney(board.overview.totalInflow)}
+                  </div>
+                </div>
+                <div className="rounded-md border px-2.5 py-2">
+                  <div className="text-muted-foreground text-[11px] leading-4">总流出</div>
+                  <div className="tabular-nums text-base font-semibold text-rose-600">
+                    {fmtMoney(board.overview.totalOutflow)}
+                  </div>
+                </div>
+                <div className="rounded-md border px-2.5 py-2">
+                  <div className="text-muted-foreground text-[11px] leading-4">净流量</div>
+                  <div className="tabular-nums text-base font-semibold">
+                    {fmtMoney(board.overview.netFlow)}
+                  </div>
+                </div>
+                <div className="rounded-md border px-2.5 py-2">
+                  <div className="text-muted-foreground text-[11px] leading-4">命中主计划数</div>
+                  <div className="tabular-nums text-base font-semibold">
+                    {board.overview.matchedMainPlanCount}
+                  </div>
+                </div>
+                <div className="rounded-md border px-2.5 py-2">
+                  <div className="text-muted-foreground text-[11px] leading-4">命中子计划数</div>
+                  <div className="tabular-nums text-base font-semibold">
+                    {board.overview.matchedSubPlanCount}
+                  </div>
+                </div>
+              </div>
+              <div className="h-[260px] w-full rounded-md border p-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={board.trend.map((t) => ({
+                      ...t,
+                      inflowN: Number(t.inflow),
+                      outflowN: Number(t.outflow),
+                    }))}
+                    margin={{ top: 8, right: 12, left: 8, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 11 }} width={56} />
+                    <Tooltip />
+                    <Bar dataKey="inflowN" name="流入" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="outflowN" name="流出" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-muted-foreground text-xs">{board.note}</p>
+            </>
+          ) : (
+            <p className="text-muted-foreground text-sm">暂无看板数据</p>
+          )}
+        </CardContent>
+      </Card>
       ) : null}
 
       <Card>
@@ -410,6 +674,7 @@ export default function CashPlanListPage() {
                 <TableRow>
                   <TableHead>名称</TableHead>
                   <TableHead>计划期间</TableHead>
+                  <TableHead>范围</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>更新日期</TableHead>
                   <TableHead className="min-w-[148px]">操作</TableHead>
@@ -419,7 +684,7 @@ export default function CashPlanListPage() {
                 {items.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={5}
+                      colSpan={6}
                       className="text-muted-foreground h-24 text-center"
                     >
                       暂无资金计划
@@ -433,6 +698,9 @@ export default function CashPlanListPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm tabular-nums">
                         {formatPeriod(row.periodStart, row.periodEnd)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {row.rootDepartmentCode ?? "全组织"}
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusBadgeVariant(row.status)}>
@@ -505,9 +773,9 @@ export default function CashPlanListPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>创建资金计划</DialogTitle>
+            <DialogTitle>生成月度主计划</DialogTitle>
             <DialogDescription>
-              填写计划期间；名称与审批流程可选。
+              按月份生成主计划；必须选择组织内顶级部门作为范围。
             </DialogDescription>
           </DialogHeader>
           <Form {...createForm}>
@@ -519,7 +787,7 @@ export default function CashPlanListPage() {
                   <FormItem>
                     <FormLabel>名称（可选）</FormLabel>
                     <FormControl>
-                      <Input placeholder="如：2026 年 Q1 资金计划" {...field} />
+                    <Input placeholder="如：2026-04 主计划" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -527,12 +795,12 @@ export default function CashPlanListPage() {
               />
               <FormField
                 control={createForm.control}
-                name="periodStart"
+                name="month"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>开始日期</FormLabel>
+                    <FormLabel>月份</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} />
+                      <Input type="month" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -540,13 +808,31 @@ export default function CashPlanListPage() {
               />
               <FormField
                 control={createForm.control}
-                name="periodEnd"
+                name="rootDepartmentCode"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>结束日期</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
+                    <FormLabel>顶级部门（必选）</FormLabel>
+                    <Select
+                      value={field.value || ""}
+                      onValueChange={field.onChange}
+                      disabled={processesLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="请选择顶级部门" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {topDepartments.map((d) => (
+                          <SelectItem key={d.code} value={d.code}>
+                            {d.code} · {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      生成月度主计划必须指定一个顶级部门，不支持“全组织”。
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -11,6 +11,7 @@ import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
   ENTITY_CASH_PLAN_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -233,6 +234,15 @@ type DetailPayload = {
   budget: BudgetDetail | null
   adjustmentDetail: AdjustmentDetailPayload | null
   cashPlan: CashPlanDetail | null
+  cashPlanSubPlan: {
+    id: string
+    parentHeaderId: string
+    scopeDepartmentCode: string
+    name: string | null
+    status: string
+    incomes: CashPlanLineRow[]
+    expenses: CashPlanLineRow[]
+  } | null
   history: HistoryRow[]
   pending: {
     id: string
@@ -769,6 +779,35 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
         </Card>
       ) : null}
 
+      {data.entityType === ENTITY_CASH_PLAN_SUB_PLAN && data.cashPlanSubPlan ? (
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 border-b">
+            <div>
+              <CardTitle>资金子计划</CardTitle>
+              <CardDescription>
+                {data.cashPlanSubPlan.name?.trim() || "未命名子计划"} · 部门{" "}
+                {data.cashPlanSubPlan.scopeDepartmentCode}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">{data.cashPlanSubPlan.status}</Badge>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/cash-plan/${data.cashPlanSubPlan.parentHeaderId}`}>
+                  打开主计划
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+        </Card>
+      ) : data.entityType === ENTITY_CASH_PLAN_SUB_PLAN ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>资金子计划</CardTitle>
+            <CardDescription>未找到对应子计划或无权访问。</CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       {data.entityType === ENTITY_BUDGET_ADJUSTMENT &&
       data.adjustmentDetail ? (
         <>
@@ -1000,7 +1039,8 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
           </CardHeader>
         </Card>
       ) : data.entityType !== ENTITY_BUDGET_HEADER &&
-        data.entityType !== ENTITY_CASH_PLAN_HEADER ? (
+        data.entityType !== ENTITY_CASH_PLAN_HEADER &&
+        data.entityType !== ENTITY_CASH_PLAN_SUB_PLAN ? (
         <Card>
           <CardHeader>
             <CardTitle>业务实体</CardTitle>

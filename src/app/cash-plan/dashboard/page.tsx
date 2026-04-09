@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
+import { UserRole } from "@/lib/auth/roles"
 import { useBudgetStore } from "@/stores/budget-store"
 
 const SEVERITY_LABEL: Record<string, string> = {
@@ -121,6 +122,7 @@ export default function CashFlowDashboardPage() {
   const mockOrgId = useBudgetStore((s) => s.mockOrgId)
   const mockUserId = useBudgetStore((s) => s.mockUserId)
   const mockUserRole = useBudgetStore((s) => s.mockUserRole)
+  const canViewDashboard = mockUserRole === UserRole.ADMIN
 
   const now = new Date()
   const [year, setYear] = React.useState(now.getUTCFullYear())
@@ -177,6 +179,22 @@ export default function CashFlowDashboardPage() {
       netN: Number(r.net),
     }))
   }, [data])
+
+  if (!canViewDashboard) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
+        <Alert variant="destructive">
+          <AlertTitle>无权限访问</AlertTitle>
+          <AlertDescription>现金流看板仅管理员可查看。</AlertDescription>
+        </Alert>
+        <div>
+          <Button asChild variant="outline">
+            <Link href="/cash-plan">返回资金计划</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import { ENTITY_CASH_PLAN_HEADER } from "@/lib/api/cash-plan-constants"
 
@@ -38,6 +39,13 @@ export async function enrichApprovalTodoRows(
     ...new Set(
       rows
         .filter((r) => r.entityType === ENTITY_BUDGET_ADJUSTMENT)
+        .map((r) => r.entityId)
+    ),
+  ]
+  const subPlanIds = [
+    ...new Set(
+      rows
+        .filter((r) => r.entityType === ENTITY_CASH_PLAN_SUB_PLAN)
         .map((r) => r.entityId)
     ),
   ]
@@ -102,6 +110,28 @@ export async function enrichApprovalTodoRows(
         entityTitle: title || `预算调整 ${a.id.slice(0, 8)}…`,
         applicantName: a.requester?.name ?? a.requester?.email ?? null,
         applicationTime: a.createdAt.toISOString(),
+      })
+    }
+  }
+
+  if (subPlanIds.length > 0) {
+    const subPlans = await prisma.cashPlanSubPlan.findMany({
+      where: { id: { in: subPlanIds }, organizationId },
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        scopeDepartmentCode: true,
+        createdBy: { select: { name: true, email: true } },
+      },
+    })
+    for (const s of subPlans) {
+      map.set(`${ENTITY_CASH_PLAN_SUB_PLAN}:${s.id}`, {
+        entityTitle:
+          s.name?.trim() ||
+          `子计划 ${s.scopeDepartmentCode} ${s.id.slice(0, 8)}…`,
+        applicantName: s.createdBy?.name ?? s.createdBy?.email ?? null,
+        applicationTime: s.createdAt.toISOString(),
       })
     }
   }

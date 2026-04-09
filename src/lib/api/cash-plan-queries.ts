@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma"
-import type { CashPlanWithLines } from "@/lib/api/cash-plan-serialize"
+import type {
+  CashPlanSubPlanWithLines,
+  CashPlanWithLines,
+} from "@/lib/api/cash-plan-serialize"
 
 const planInclude = {
   incomes: { orderBy: { expectedDate: "asc" as const } },
@@ -55,3 +58,41 @@ export async function findCashPlanExpenseLine(
 }
 
 export { planInclude }
+
+const subPlanInclude = {
+  incomes: { orderBy: { expectedDate: "asc" as const } },
+  expenses: { orderBy: { expectedDate: "asc" as const } },
+}
+
+export async function findCashPlanSubPlanDetail(
+  id: string,
+  organizationId: string
+): Promise<CashPlanSubPlanWithLines | null> {
+  const row = await prisma.cashPlanSubPlan.findFirst({
+    where: { id, organizationId },
+    include: subPlanInclude,
+  })
+  return row as CashPlanSubPlanWithLines | null
+}
+
+export async function findCashPlanSubPlanHeaderOnly(
+  id: string,
+  organizationId: string
+) {
+  return prisma.cashPlanSubPlan.findFirst({
+    where: { id, organizationId },
+  })
+}
+
+export async function listCashPlanSubPlans(
+  parentHeaderId: string,
+  organizationId: string
+) {
+  return prisma.cashPlanSubPlan.findMany({
+    where: { parentHeaderId, organizationId },
+    orderBy: { createdAt: "desc" },
+    include: subPlanInclude,
+  })
+}
+
+export { subPlanInclude }

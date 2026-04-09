@@ -11,6 +11,8 @@ import { handleRouteError } from "@/lib/api/prisma-errors"
 import { created, fail, fromZodError, ok } from "@/lib/api/response"
 import { Permission } from "@/lib/auth/permissions"
 import type { Prisma } from "@/generated/prisma/client"
+import { UserRole } from "@/lib/auth/roles"
+import { validateRootDepartmentCode } from "@/lib/api/cash-plan-department-scope"
 
 function orderByFromQuery(
   sortBy: string,
@@ -65,7 +67,11 @@ export async function GET(request: Request) {
     ])
 
     return ok({
-      items: rows.map((h) => serializeCashPlanHeader(h)),
+      items: rows.map((h) =>
+        serializeCashPlanHeader(h, undefined, {
+          includeBalance: auth.role === UserRole.ADMIN,
+        })
+      ),
       pagination: {
         page,
         pageSize,
@@ -102,11 +108,19 @@ export async function POST(request: Request) {
     }
 
     const actorId = await resolveActorUserId(auth)
+    const rootScope = await validateRootDepartmentCode(
+      auth.organizationId,
+      data.rootDepartmentCode
+    )
+    if (!rootScope.ok) {
+      return fail("VALIDATION_ERROR", rootScope.message, 400)
+    }
 
     const plan = await prisma.cashPlanHeader.create({
       data: {
         organizationId: auth.organizationId,
         name: data.name ?? null,
+        rootDepartmentCode: rootScope.code,
         periodStart: ps,
         periodEnd: pe,
         approvalProcessId: data.approvalProcessId ?? null,
@@ -115,7 +129,13 @@ export async function POST(request: Request) {
       include: planInclude,
     })
 
-    return created(serializeCashPlanHeader(plan, { incomes: plan.incomes, expenses: plan.expenses }))
+    return created(
+      serializeCashPlanHeader(
+        plan,
+        { incomes: plan.incomes, expenses: plan.expenses },
+        { includeBalance: auth.role === UserRole.ADMIN }
+      )
+    )
   } catch (e) {
     return handleRouteError(e)
   }

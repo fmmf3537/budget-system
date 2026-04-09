@@ -3,10 +3,10 @@ import { prisma } from "@/lib/prisma"
 import { cashDashboardQuerySchema } from "@/lib/api/cash-dashboard-schemas"
 import { serializeDecimal } from "@/lib/api/budget-serialize"
 import { serializeWarningRecord } from "@/lib/api/cash-plan-serialize"
-import { requireApiPermission } from "@/lib/api/require-permission"
+import { requireAuth } from "@/lib/api/request-auth"
 import { handleRouteError } from "@/lib/api/prisma-errors"
-import { fromZodError, ok } from "@/lib/api/response"
-import { Permission } from "@/lib/auth/permissions"
+import { fail, fromZodError, ok } from "@/lib/api/response"
+import { UserRole } from "@/lib/auth/roles"
 import dayjs from "dayjs"
 import utc from "dayjs/plugin/utc"
 
@@ -23,9 +23,12 @@ function monthKey(d: Date): string {
 
 export async function GET(request: Request) {
   try {
-    const authOrErr = await requireApiPermission(request, Permission.CASH_PLAN_VIEW)
-    if (authOrErr instanceof Response) return authOrErr
-    const auth = authOrErr
+    const authOr = await requireAuth(request)
+    if (authOr instanceof Response) return authOr
+    const auth = authOr
+    if (auth.role !== UserRole.ADMIN) {
+      return fail("FORBIDDEN", "仅管理员可查看看板", 403)
+    }
     const raw = Object.fromEntries(new URL(request.url).searchParams)
     const parsed = cashDashboardQuerySchema.safeParse(raw)
     if (!parsed.success) return fromZodError(parsed.error)

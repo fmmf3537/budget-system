@@ -4,6 +4,7 @@ import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
   ENTITY_CASH_PLAN_HEADER,
+  ENTITY_CASH_PLAN_SUB_PLAN,
 } from "@/lib/api/approval-constants"
 import {
   canActorHandlePending,
@@ -16,12 +17,19 @@ import {
   resolveActorUserId,
 } from "@/lib/api/budget-queries"
 import { serializeBudgetDetail } from "@/lib/api/budget-serialize"
-import { findCashPlanDetail } from "@/lib/api/cash-plan-queries"
-import { serializeCashPlanDetail } from "@/lib/api/cash-plan-serialize"
+import {
+  findCashPlanDetail,
+  findCashPlanSubPlanDetail,
+} from "@/lib/api/cash-plan-queries"
+import {
+  serializeCashPlanHeader,
+  serializeCashPlanSubPlan,
+} from "@/lib/api/cash-plan-serialize"
 import { requireAuth } from "@/lib/api/request-auth"
 import { UserStatus } from "@/generated/prisma/enums"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { fail, ok } from "@/lib/api/response"
+import { UserRole } from "@/lib/auth/roles"
 
 type RouteCtx = { params: Promise<{ processId: string }> }
 
@@ -82,7 +90,8 @@ export async function GET(request: Request, ctx: RouteCtx) {
     let adjustmentDetail = null as Awaited<
       ReturnType<typeof getAdjustmentDetailPayload>
     > | null
-    let cashPlan = null as ReturnType<typeof serializeCashPlanDetail> | null
+    let cashPlan = null as ReturnType<typeof serializeCashPlanHeader> | null
+    let cashPlanSubPlan = null as ReturnType<typeof serializeCashPlanSubPlan> | null
 
     if (entityType === ENTITY_BUDGET_HEADER) {
       const b = await findBudgetDetail(entityId, auth.organizationId)
@@ -94,7 +103,21 @@ export async function GET(request: Request, ctx: RouteCtx) {
       )
     } else if (entityType === ENTITY_CASH_PLAN_HEADER) {
       const c = await findCashPlanDetail(entityId, auth.organizationId)
-      if (c) cashPlan = serializeCashPlanDetail(c)
+      if (c) {
+        cashPlan = serializeCashPlanHeader(
+          c,
+          { incomes: c.incomes, expenses: c.expenses },
+          { includeBalance: auth.role === UserRole.ADMIN }
+        )
+      }
+    } else if (entityType === ENTITY_CASH_PLAN_SUB_PLAN) {
+      const s = await findCashPlanSubPlanDetail(entityId, auth.organizationId)
+      if (s) {
+        cashPlanSubPlan = serializeCashPlanSubPlan(s, {
+          incomes: s.incomes,
+          expenses: s.expenses,
+        })
+      }
     }
 
     const canAct =
@@ -109,6 +132,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
       budget,
       adjustmentDetail,
       cashPlan,
+      cashPlanSubPlan,
       history: history.map((r) => ({
         ...serializeApprovalRecord(r, {
           process: { name: process.name },
