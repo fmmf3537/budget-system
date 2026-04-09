@@ -18,6 +18,8 @@ export const Permission = {
   ADJUSTMENT_CREATE: "adjustment:create",
   CASH_PLAN_VIEW: "cash_plan:view",
   CASH_PLAN_EDIT: "cash_plan:edit",
+  CASH_PLAN_DELETE: "cash_plan:delete",
+  CASH_PLAN_SUBMIT: "cash_plan:submit",
 } as const
 
 export type PermissionKey = (typeof Permission)[keyof typeof Permission]
@@ -36,6 +38,8 @@ const ROLE_PERMISSIONS: Record<UserRoleType, ReadonlySet<PermissionKey>> = {
     Permission.ADJUSTMENT_CREATE,
     Permission.CASH_PLAN_VIEW,
     Permission.CASH_PLAN_EDIT,
+    Permission.CASH_PLAN_DELETE,
+    Permission.CASH_PLAN_SUBMIT,
   ]),
   [UserRole.APPROVER]: new Set([
     Permission.BUDGET_VIEW,

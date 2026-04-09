@@ -7,8 +7,10 @@ import {
 } from "@/lib/api/cash-plan-queries"
 import { serializeCashPlanDetail } from "@/lib/api/cash-plan-serialize"
 import { requireAuth } from "@/lib/api/request-auth"
+import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { fail, fromZodError, ok } from "@/lib/api/response"
+import { Permission } from "@/lib/auth/permissions"
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -93,6 +95,35 @@ export async function PUT(request: Request, ctx: RouteCtx) {
     if (!updated) return fail("NOT_FOUND", "资金计划不存在", 404)
 
     return ok(serializeCashPlanDetail(updated))
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}
+
+export async function DELETE(_request: Request, ctx: RouteCtx) {
+  try {
+    const authOrErr = await requireApiPermission(
+      _request,
+      Permission.CASH_PLAN_DELETE
+    )
+    if (authOrErr instanceof Response) return authOrErr
+    const auth = authOrErr
+    const { id } = await ctx.params
+
+    const existing = await findCashPlanHeaderOnly(id, auth.organizationId)
+    if (!existing) return fail("NOT_FOUND", "资金计划不存在或无权访问", 404)
+
+    if (existing.status !== CashPlanStatus.DRAFT) {
+      return fail(
+        "INVALID_STATE",
+        "仅编制中状态的资金计划可以删除",
+        409
+      )
+    }
+
+    await prisma.cashPlanHeader.delete({ where: { id } })
+
+    return ok({ id, deleted: true })
   } catch (e) {
     return handleRouteError(e)
   }

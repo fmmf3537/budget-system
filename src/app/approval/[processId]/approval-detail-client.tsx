@@ -10,6 +10,7 @@ import { ApprovalAction, ApprovalBizType } from "@/generated/prisma/enums"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
+  ENTITY_CASH_PLAN_HEADER,
 } from "@/lib/api/approval-constants"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -192,6 +193,34 @@ const ADJ_KIND_LABEL: Record<string, string> = {
   ROLLING: "滚动",
 }
 
+const CASH_PLAN_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "编制中",
+  SUBMITTED: "已提交",
+  APPROVED: "已锁定",
+  CLOSED: "已关闭",
+}
+
+type CashPlanLineRow = {
+  id: string
+  category: string | null
+  amount: string | null
+  expectedDate: string | null
+  remark: string | null
+}
+
+type CashPlanDetail = {
+  id: string
+  name: string | null
+  periodStart: string
+  periodEnd: string
+  status: string
+  openingBalance: string | null
+  safetyWaterLevel: string | null
+  approvalProcessId: string | null
+  incomes: CashPlanLineRow[]
+  expenses: CashPlanLineRow[]
+}
+
 type DetailPayload = {
   process: {
     id: string
@@ -203,6 +232,7 @@ type DetailPayload = {
   entityId: string
   budget: BudgetDetail | null
   adjustmentDetail: AdjustmentDetailPayload | null
+  cashPlan: CashPlanDetail | null
   history: HistoryRow[]
   pending: {
     id: string
@@ -598,6 +628,147 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
         </Card>
       ) : null}
 
+      {data.entityType === ENTITY_CASH_PLAN_HEADER && data.cashPlan ? (
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 border-b">
+            <div>
+              <CardTitle>资金计划</CardTitle>
+              <CardDescription>
+                {data.cashPlan.name?.trim() || "未命名计划"} ·{" "}
+                {data.cashPlan.periodStart.slice(0, 10)} ~{" "}
+                {data.cashPlan.periodEnd.slice(0, 10)}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">
+                {CASH_PLAN_STATUS_LABEL[data.cashPlan.status] ??
+                  data.cashPlan.status}
+              </Badge>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/cash-plan/${data.cashPlan.id}`}>
+                  打开资金计划
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6 px-0 pt-4">
+            <div className="text-muted-foreground flex flex-wrap gap-4 px-6 text-sm">
+              <span>
+                期初：{" "}
+                <span className="text-foreground font-medium tabular-nums">
+                  {data.cashPlan.openingBalance ?? "—"}
+                </span>
+              </span>
+              <span>
+                安全水位：{" "}
+                <span className="text-foreground font-medium tabular-nums">
+                  {data.cashPlan.safetyWaterLevel ?? "—"}
+                </span>
+              </span>
+            </div>
+            <div>
+              <div className="text-muted-foreground mb-2 px-6 text-xs font-medium uppercase tracking-wide">
+                计划流入
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类别</TableHead>
+                    <TableHead>预计日期</TableHead>
+                    <TableHead>备注</TableHead>
+                    <TableHead className="text-right">金额</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.cashPlan.incomes.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-muted-foreground h-14 text-center"
+                      >
+                        无流入明细
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    data.cashPlan.incomes.map((line) => (
+                      <TableRow key={line.id}>
+                        <TableCell className="max-w-[180px] text-sm">
+                          {line.category ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground tabular-nums text-sm">
+                          {line.expectedDate
+                            ? line.expectedDate.slice(0, 10)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-[220px] text-sm">
+                          {line.remark ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.amount ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div>
+              <div className="text-muted-foreground mb-2 px-6 text-xs font-medium uppercase tracking-wide">
+                计划流出
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类别</TableHead>
+                    <TableHead>预计日期</TableHead>
+                    <TableHead>备注</TableHead>
+                    <TableHead className="text-right">金额</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.cashPlan.expenses.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-muted-foreground h-14 text-center"
+                      >
+                        无流出明细
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    data.cashPlan.expenses.map((line) => (
+                      <TableRow key={line.id}>
+                        <TableCell className="max-w-[180px] text-sm">
+                          {line.category ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground tabular-nums text-sm">
+                          {line.expectedDate
+                            ? line.expectedDate.slice(0, 10)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-[220px] text-sm">
+                          {line.remark ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.amount ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : data.entityType === ENTITY_CASH_PLAN_HEADER ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>资金计划</CardTitle>
+            <CardDescription>未找到对应计划或无权访问。</CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       {data.entityType === ENTITY_BUDGET_ADJUSTMENT &&
       data.adjustmentDetail ? (
         <>
@@ -828,7 +999,8 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
             <CardDescription>未找到对应调整单或无权访问。</CardDescription>
           </CardHeader>
         </Card>
-      ) : data.entityType !== ENTITY_BUDGET_HEADER ? (
+      ) : data.entityType !== ENTITY_BUDGET_HEADER &&
+        data.entityType !== ENTITY_CASH_PLAN_HEADER ? (
         <Card>
           <CardHeader>
             <CardTitle>业务实体</CardTitle>

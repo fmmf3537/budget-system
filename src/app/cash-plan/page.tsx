@@ -9,6 +9,7 @@ import {
   EyeIcon,
   Loader2Icon,
   PlusIcon,
+  Trash2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -157,6 +158,8 @@ export default function CashPlanListPage() {
 
   const [createOpen, setCreateOpen] = React.useState(false)
   const [createSubmitting, setCreateSubmitting] = React.useState(false)
+  const [deleteTarget, setDeleteTarget] = React.useState<ListItem | null>(null)
+  const [deleteLoading, setDeleteLoading] = React.useState(false)
   const [processes, setProcesses] = React.useState<
     { id: string; name: string; bizType: string; isActive: boolean }[]
   >([])
@@ -300,6 +303,29 @@ export default function CashPlanListPage() {
     }
   })
 
+  async function confirmDeletePlan() {
+    if (!deleteTarget) return
+    setDeleteLoading(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "删除失败")
+        return
+      }
+      toast.success("已删除资金计划")
+      setDeleteTarget(null)
+      void fetchList()
+    } catch {
+      toast.error("删除失败")
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -386,7 +412,7 @@ export default function CashPlanListPage() {
                   <TableHead>计划期间</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>更新日期</TableHead>
-                  <TableHead className="w-[100px]">操作</TableHead>
+                  <TableHead className="min-w-[148px]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -417,12 +443,27 @@ export default function CashPlanListPage() {
                         {row.updatedAt.slice(0, 10)}
                       </TableCell>
                       <TableCell>
-                        <Button asChild variant="outline" size="sm">
-                          <Link href={`/cash-plan/${row.id}`}>
-                            <EyeIcon className="mr-1 size-3.5" />
-                            查看
-                          </Link>
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/cash-plan/${row.id}`}>
+                              <EyeIcon className="mr-1 size-3.5" />
+                              查看
+                            </Link>
+                          </Button>
+                          {row.status === CashPlanStatus.DRAFT ? (
+                            <Can permission={Permission.CASH_PLAN_DELETE}>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setDeleteTarget(row)}
+                              >
+                                <Trash2Icon className="mr-1 size-3.5" />
+                                删除
+                              </Button>
+                            </Can>
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -557,6 +598,44 @@ export default function CashPlanListPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget != null}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除资金计划？</DialogTitle>
+            <DialogDescription>
+              将永久删除「
+              {deleteTarget?.name?.trim() || "该计划"}」及其全部流入/流出明细，此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleteLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteLoading}
+              onClick={() => void confirmDeletePlan()}
+            >
+              {deleteLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              删除
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

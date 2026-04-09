@@ -1,2 +1,2 @@
-/** 与 `WarningRecord.entityType`、业务引用对齐 */
-export const ENTITY_CASH_PLAN_HEADER = "CashPlanHeader"
+/** 与 `WarningRecord.entityType`、审批 entityType 一致 */
+export { ENTITY_CASH_PLAN_HEADER } from "@/lib/api/approval-constants"

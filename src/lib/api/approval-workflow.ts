@@ -3,11 +3,13 @@ import {
   AdjustmentStatus,
   ApprovalAction,
   BudgetStatus,
+  CashPlanStatus,
 } from "@/generated/prisma/enums"
 import type { Prisma } from "@/generated/prisma/client"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
+  ENTITY_CASH_PLAN_HEADER,
 } from "@/lib/api/approval-constants"
 import {
   getEntityTotalAmountForRouting,
@@ -131,6 +133,66 @@ export async function startApprovalForEntity(params: {
   return { created: true }
 }
 
+export type WithdrawSubmissionResult =
+  | { ok: true }
+  | { ok: false; code: "HAS_APPROVED" | "INVALID_STATE" }
+
+/**
+ * 提交人撤回：将 PENDING 待办标为已取消，并把业务单据恢复为草稿。
+ * 若本单据在审批链上已出现过「同意」，则拒绝撤回。
+ */
+export async function withdrawSubmittedEntity(params: {
+  organizationId: string
+  entityType: string
+  entityId: string
+  resolvedActorId: string | null
+  cancelComment?: string | null
+  finalizeDraft: (tx: Prisma.TransactionClient) => Promise<{ updated: boolean }>
+}): Promise<WithdrawSubmissionResult> {
+  const {
+    organizationId,
+    entityType,
+    entityId,
+    resolvedActorId,
+    cancelComment,
+    finalizeDraft,
+  } = params
+  const comment = (cancelComment?.trim() || "提交人撤回").slice(0, 2000)
+
+  return prisma.$transaction(async (tx) => {
+    const approved = await tx.approvalRecord.count({
+      where: {
+        entityType,
+        entityId,
+        action: ApprovalAction.APPROVED,
+        process: { organizationId },
+      },
+    })
+    if (approved > 0) {
+      return { ok: false as const, code: "HAS_APPROVED" as const }
+    }
+
+    await tx.approvalRecord.updateMany({
+      where: {
+        entityType,
+        entityId,
+        action: ApprovalAction.PENDING,
+        process: { organizationId },
+      },
+      data: {
+        action: ApprovalAction.CANCELLED,
+        actedAt: new Date(),
+        comment,
+        actorUserId: resolvedActorId,
+      },
+    })
+
+    const { updated } = await finalizeDraft(tx)
+    if (!updated) return { ok: false as const, code: "INVALID_STATE" as const }
+    return { ok: true as const }
+  })
+}
+
 async function finalizeBudgetApprovedTx(
   tx: Prisma.TransactionClient,
   entityType: string,
@@ -179,6 +241,30 @@ async function finalizeAdjustmentRejectedTx(
   await tx.budgetAdjustment.updateMany({
     where: { id: entityId, status: AdjustmentStatus.SUBMITTED },
     data: { status: AdjustmentStatus.REJECTED },
+  })
+}
+
+async function finalizeCashPlanApprovedTx(
+  tx: Prisma.TransactionClient,
+  entityType: string,
+  entityId: string
+) {
+  if (entityType !== ENTITY_CASH_PLAN_HEADER) return
+  await tx.cashPlanHeader.updateMany({
+    where: { id: entityId, status: CashPlanStatus.SUBMITTED },
+    data: { status: CashPlanStatus.APPROVED },
+  })
+}
+
+async function finalizeCashPlanRejectedTx(
+  tx: Prisma.TransactionClient,
+  entityType: string,
+  entityId: string
+) {
+  if (entityType !== ENTITY_CASH_PLAN_HEADER) return
+  await tx.cashPlanHeader.updateMany({
+    where: { id: entityId, status: CashPlanStatus.SUBMITTED },
+    data: { status: CashPlanStatus.DRAFT },
   })
 }
 
@@ -262,6 +348,7 @@ export async function runApprove(params: {
 
     await finalizeBudgetApprovedTx(tx, entityType, entityId)
     await finalizeAdjustmentApprovedTx(tx, entityType, entityId)
+    await finalizeCashPlanApprovedTx(tx, entityType, entityId)
     return { ok: true as const, completed: true as const, recordId: record.id }
   })
 }
@@ -382,6 +469,7 @@ export async function runReject(params: {
 
     await finalizeBudgetRejectedTx(tx, entityType, entityId)
     await finalizeAdjustmentRejectedTx(tx, entityType, entityId)
+    await finalizeCashPlanRejectedTx(tx, entityType, entityId)
     return {
       ok: true as const,
       recordId: record.id,

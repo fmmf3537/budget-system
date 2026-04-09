@@ -104,6 +104,7 @@ type BudgetStoreState = {
 
   deleteBudget: (id: string) => Promise<{ ok: boolean; message: string }>
   submitBudget: (id: string) => Promise<{ ok: boolean; message: string }>
+  withdrawBudget: (id: string) => Promise<{ ok: boolean; message: string }>
 }
 
 export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
@@ -261,6 +262,27 @@ export const useBudgetStore = create<BudgetStoreState>((set, get) => ({
       }
       await fetchList()
       return { ok: true, message: "已提交审批" }
+    } catch {
+      return { ok: false, message: "网络异常" }
+    }
+  },
+
+  withdrawBudget: async (id) => {
+    const { mockOrgId, mockUserId, mockUserRole, fetchList } = get()
+    try {
+      const res = await fetch(`/api/budget/${id}/withdraw`, {
+        method: "POST",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<{ message?: string }> | ApiFail
+      if (!json.success) {
+        return { ok: false, message: json.error?.message ?? "撤回失败" }
+      }
+      await fetchList()
+      return {
+        ok: true,
+        message: json.data?.message ?? "已撤回提交",
+      }
     } catch {
       return { ok: false, message: "网络异常" }
     }

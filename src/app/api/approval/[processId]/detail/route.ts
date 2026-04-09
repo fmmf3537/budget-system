@@ -3,6 +3,7 @@ import { getAdjustmentDetailPayload } from "@/lib/api/adjustment-detail"
 import {
   ENTITY_BUDGET_ADJUSTMENT,
   ENTITY_BUDGET_HEADER,
+  ENTITY_CASH_PLAN_HEADER,
 } from "@/lib/api/approval-constants"
 import {
   canActorHandlePending,
@@ -15,6 +16,8 @@ import {
   resolveActorUserId,
 } from "@/lib/api/budget-queries"
 import { serializeBudgetDetail } from "@/lib/api/budget-serialize"
+import { findCashPlanDetail } from "@/lib/api/cash-plan-queries"
+import { serializeCashPlanDetail } from "@/lib/api/cash-plan-serialize"
 import { requireAuth } from "@/lib/api/request-auth"
 import { UserStatus } from "@/generated/prisma/enums"
 import { handleRouteError } from "@/lib/api/prisma-errors"
@@ -79,6 +82,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
     let adjustmentDetail = null as Awaited<
       ReturnType<typeof getAdjustmentDetailPayload>
     > | null
+    let cashPlan = null as ReturnType<typeof serializeCashPlanDetail> | null
 
     if (entityType === ENTITY_BUDGET_HEADER) {
       const b = await findBudgetDetail(entityId, auth.organizationId)
@@ -88,6 +92,9 @@ export async function GET(request: Request, ctx: RouteCtx) {
         entityId,
         auth.organizationId
       )
+    } else if (entityType === ENTITY_CASH_PLAN_HEADER) {
+      const c = await findCashPlanDetail(entityId, auth.organizationId)
+      if (c) cashPlan = serializeCashPlanDetail(c)
     }
 
     const canAct =
@@ -101,6 +108,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
       entityId,
       budget,
       adjustmentDetail,
+      cashPlan,
       history: history.map((r) => ({
         ...serializeApprovalRecord(r, {
           process: { name: process.name },

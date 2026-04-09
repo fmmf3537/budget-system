@@ -129,10 +129,12 @@ export default function BudgetListPage() {
   const changePageSize = useBudgetStore((s) => s.changePageSize)
   const deleteBudget = useBudgetStore((s) => s.deleteBudget)
   const submitBudget = useBudgetStore((s) => s.submitBudget)
+  const withdrawBudget = useBudgetStore((s) => s.withdrawBudget)
 
   const [confirm, setConfirm] = React.useState<
     | { kind: "delete"; row: BudgetListItem }
     | { kind: "submit"; row: BudgetListItem }
+    | { kind: "withdraw"; row: BudgetListItem }
     | null
   >(null)
   const [confirmLoading, setConfirmLoading] = React.useState(false)
@@ -149,8 +151,12 @@ export default function BudgetListPage() {
         const r = await deleteBudget(confirm.row.id)
         if (r.ok) toast.success(r.message)
         else toast.error(r.message)
-      } else {
+      } else if (confirm.kind === "submit") {
         const r = await submitBudget(confirm.row.id)
+        if (r.ok) toast.success(r.message)
+        else toast.error(r.message)
+      } else {
+        const r = await withdrawBudget(confirm.row.id)
         if (r.ok) toast.success(r.message)
         else toast.error(r.message)
       }
@@ -457,6 +463,9 @@ export default function BudgetListPage() {
                           row={row}
                           onDelete={() => setConfirm({ kind: "delete", row })}
                           onSubmit={() => setConfirm({ kind: "submit", row })}
+                          onWithdraw={() =>
+                            setConfirm({ kind: "withdraw", row })
+                          }
                         />
                       </TableCell>
                     </TableRow>
@@ -519,12 +528,18 @@ export default function BudgetListPage() {
         <DialogContent showCloseButton>
           <DialogHeader>
             <DialogTitle>
-              {confirm?.kind === "delete" ? "确认删除" : "确认提交审批"}
+              {confirm?.kind === "delete"
+                ? "确认删除"
+                : confirm?.kind === "withdraw"
+                  ? "确认撤回提交"
+                  : "确认提交审批"}
             </DialogTitle>
             <DialogDescription>
               {confirm?.kind === "delete"
                 ? `将永久删除预算「${confirm.row.name}」，此操作不可恢复。`
-                : `将提交预算「${confirm?.row.name}」进入审批流程。`}
+                : confirm?.kind === "withdraw"
+                  ? `将预算「${confirm.row.name}」从已提交撤回到草稿；进行中的审批待办将被取消（若已有节点同意则无法撤回）。`
+                  : `将提交预算「${confirm?.row.name}」进入审批流程。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -561,15 +576,18 @@ function RowActions({
   row,
   onDelete,
   onSubmit,
+  onWithdraw,
 }: {
   row: BudgetListItem
   onDelete: () => void
   onSubmit: () => void
+  onWithdraw: () => void
 }) {
   const canEdit =
     row.status === BudgetStatus.DRAFT || row.status === BudgetStatus.REJECTED
   const canDelete = row.status === BudgetStatus.DRAFT
   const canSubmit = row.status === BudgetStatus.DRAFT
+  const canWithdraw = row.status === BudgetStatus.SUBMITTED
 
   return (
     <DropdownMenu>
@@ -592,6 +610,11 @@ function RowActions({
         {canSubmit ? (
           <Can permission={Permission.BUDGET_SUBMIT}>
             <DropdownMenuItem onClick={onSubmit}>提交审批</DropdownMenuItem>
+          </Can>
+        ) : null}
+        {canWithdraw ? (
+          <Can permission={Permission.BUDGET_SUBMIT}>
+            <DropdownMenuItem onClick={onWithdraw}>撤回提交</DropdownMenuItem>
           </Can>
         ) : null}
         {canDelete ? (

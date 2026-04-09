@@ -67,6 +67,8 @@ import {
 } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { buildMockHeaders } from "@/lib/api/mock-headers"
+import { Can } from "@/components/auth/can"
+import { Permission } from "@/lib/auth/permissions"
 import type {
   CashPlanExcelRowError,
   CashPlanLineImportDto,
@@ -107,6 +109,7 @@ type PlanDetail = {
   status: string
   openingBalance: string | null
   safetyWaterLevel: string | null
+  approvalProcessId: string | null
   incomes: LineRow[]
   expenses: LineRow[]
 }
@@ -290,6 +293,13 @@ export function CashPlanDetailView() {
   const [lineSubmitting, setLineSubmitting] = React.useState(false)
 
   const [basicSaving, setBasicSaving] = React.useState(false)
+
+  const [submitOpen, setSubmitOpen] = React.useState(false)
+  const [submitLoading, setSubmitLoading] = React.useState(false)
+  const [withdrawOpen, setWithdrawOpen] = React.useState(false)
+  const [withdrawLoading, setWithdrawLoading] = React.useState(false)
+  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const [deleteLoading, setDeleteLoading] = React.useState(false)
 
   const [cashExcelOpen, setCashExcelOpen] = React.useState(false)
   const [cashExcelBusy, setCashExcelBusy] = React.useState(false)
@@ -760,6 +770,85 @@ export function CashPlanDetailView() {
     }
   })
 
+  async function postSubmitForApproval() {
+    if (!id || !plan) return
+    setSubmitLoading(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${id}/submit`, {
+        method: "POST",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<{
+        message: string
+        approval?: { created: boolean; reason?: string } | null
+      }> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "提交失败")
+        return
+      }
+      toast.success(json.data.message)
+      if (json.data.approval && !json.data.approval.created && json.data.approval.reason) {
+        toast.message(json.data.approval.reason)
+      }
+      setSubmitOpen(false)
+      await loadPlan()
+      void loadForecast()
+      void loadWarnings()
+    } catch {
+      toast.error("提交失败")
+    } finally {
+      setSubmitLoading(false)
+    }
+  }
+
+  async function postWithdrawSubmission() {
+    if (!id || !plan) return
+    setWithdrawLoading(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${id}/withdraw`, {
+        method: "POST",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<{ message: string }> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "撤回失败")
+        return
+      }
+      toast.success(json.data.message)
+      setWithdrawOpen(false)
+      await loadPlan()
+      void loadForecast()
+      void loadWarnings()
+    } catch {
+      toast.error("撤回失败")
+    } finally {
+      setWithdrawLoading(false)
+    }
+  }
+
+  async function postDeletePlan() {
+    if (!id || !plan) return
+    setDeleteLoading(true)
+    try {
+      const res = await fetch(`/api/cash-plan/${id}`, {
+        method: "DELETE",
+        headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "删除失败")
+        return
+      }
+      toast.success("已删除资金计划")
+      setDeleteOpen(false)
+      router.push("/cash-plan")
+    } catch {
+      toast.error("删除失败")
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
   if (!id) {
     return (
       <div className="p-6">
@@ -831,6 +920,51 @@ export function CashPlanDetailView() {
             <FileSpreadsheetIcon className="mr-2 size-4" />
             Excel 导入
           </Button>
+          {plan?.status === CashPlanStatus.DRAFT ? (
+            <Can permission={Permission.CASH_PLAN_DELETE}>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={deleteLoading || loading || cashExcelBusy}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2Icon className="mr-2 size-4" />
+                删除计划
+              </Button>
+            </Can>
+          ) : null}
+          <Can permission={Permission.CASH_PLAN_SUBMIT}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={
+                !plan || plan.status !== CashPlanStatus.DRAFT || submitLoading
+              }
+              onClick={() => setSubmitOpen(true)}
+            >
+              {submitLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              提交审批
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={
+                !plan ||
+                plan.status !== CashPlanStatus.SUBMITTED ||
+                withdrawLoading
+              }
+              onClick={() => setWithdrawOpen(true)}
+            >
+              {withdrawLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              撤回提交
+            </Button>
+          </Can>
         </div>
       </div>
 
@@ -1403,6 +1537,109 @@ export function CashPlanDetailView() {
           </TabsContent>
         </Tabs>
       ) : null}
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除资金计划？</DialogTitle>
+            <DialogDescription>
+              将永久删除「{plan?.name?.trim() || "该计划"}」及其全部流入/流出明细，此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleteLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={deleteLoading}
+              onClick={() => void postDeletePlan()}
+            >
+              {deleteLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认撤回提交</DialogTitle>
+            <DialogDescription>
+              将资金计划从「已提交」撤回到编制中，进行中的审批待办将被取消。若审批链上已有节点同意，将无法撤回。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setWithdrawOpen(false)}
+              disabled={withdrawLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={withdrawLoading}
+              onClick={() => void postWithdrawSubmission()}
+            >
+              {withdrawLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              确认撤回
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={submitOpen} onOpenChange={setSubmitOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认提交审批</DialogTitle>
+            <DialogDescription className="space-y-2">
+              <p>
+                将「{plan?.name?.trim() || "资金计划"}」标记为已提交。
+                {plan?.approvalProcessId
+                  ? " 系统将按绑定的审批流程尝试生成待办。"
+                  : " 当前未绑定审批流程，提交后不会产生审批待办；可在编辑计划基本信息时绑定流程后再次从编制中提交。"}
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSubmitOpen(false)}
+              disabled={submitLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={submitLoading}
+              onClick={() => void postSubmitForApproval()}
+            >
+              {submitLoading ? (
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+              ) : null}
+              确认提交
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={cashExcelOpen} onOpenChange={onCashExcelDialogOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">

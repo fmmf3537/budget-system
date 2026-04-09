@@ -63,6 +63,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Can } from "@/components/auth/can"
+import { Permission } from "@/lib/auth/permissions"
 import {
   Table,
   TableBody,
@@ -319,6 +321,10 @@ export function BudgetForm({
   const [serverStatus, setServerStatus] = React.useState<string | null>(null)
   const [serverTotal, setServerTotal] = React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
+  const [withdrawOpen, setWithdrawOpen] = React.useState(false)
+  const [withdrawLoading, setWithdrawLoading] = React.useState(false)
+  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const [deleteLoading, setDeleteLoading] = React.useState(false)
   const [excelOpen, setExcelOpen] = React.useState(false)
   const [excelBusy, setExcelBusy] = React.useState(false)
   const [excelParseErrors, setExcelParseErrors] = React.useState<
@@ -567,67 +573,64 @@ export function BudgetForm({
     }
   }, [mockOrgId, mockUserId, mockUserRole])
 
-  React.useEffect(() => {
+  const loadBudgetDetail = React.useCallback(async () => {
     if (mode !== "edit" || !budgetId) return
-    let cancelled = false
-    ;(async () => {
-      setDetailLoading(true)
-      setLoadError(null)
-      try {
-        const res = await fetch(`/api/budget/${budgetId}`, {
-          headers: buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole),
-        })
-        const json = (await res.json()) as
-          | ApiSuccess<BudgetDetailResponse>
-          | ApiFail
-        if (cancelled) return
-        if (!json.success) {
-          setLoadError(json.error?.message ?? "加载预算失败")
-          return
-        }
-        const d = json.data
-        setServerVersion(d.version)
-        setServerStatus(d.status)
-        setServerTotal(d.totalAmount)
-        resolvedIdRef.current = d.id
-        form.reset({
-          name: d.name,
-          fiscalYear: d.fiscalYear,
-          compilationGranularity: d.compilationGranularity,
-          periodUnit: d.periodUnit,
-          code: d.code ?? "",
-          currency: d.currency,
-          compilationMethod:
-            d.compilationMethod &&
-            (BUDGET_COMPILATION_METHODS as readonly string[]).includes(
-              d.compilationMethod
-            )
-              ? (d.compilationMethod as BudgetFormValues["compilationMethod"])
-              : null,
-          lines:
-            d.lines.length > 0
-              ? d.lines.map((l) => ({
-                  clientKey: l.id,
-                  subjectId: l.subjectId,
-                  amount: String(l.amount ?? "0"),
-                  amountYtd: l.amountYtd ?? "",
-                  remark: l.remark ?? "",
-                  departmentCode: l.departmentCode ?? "",
-                  dimension1: l.dimension1 ?? "",
-                  dimension2: l.dimension2 ?? "",
-                }))
-              : [emptyLine()],
-        })
-      } catch {
-        if (!cancelled) setLoadError("网络异常，请稍后重试")
-      } finally {
-        if (!cancelled) setDetailLoading(false)
+    setDetailLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch(`/api/budget/${budgetId}`, {
+        headers: buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as
+        | ApiSuccess<BudgetDetailResponse>
+        | ApiFail
+      if (!json.success) {
+        setLoadError(json.error?.message ?? "加载预算失败")
+        return
       }
-    })()
-    return () => {
-      cancelled = true
+      const d = json.data
+      setServerVersion(d.version)
+      setServerStatus(d.status)
+      setServerTotal(d.totalAmount)
+      resolvedIdRef.current = d.id
+      form.reset({
+        name: d.name,
+        fiscalYear: d.fiscalYear,
+        compilationGranularity: d.compilationGranularity,
+        periodUnit: d.periodUnit,
+        code: d.code ?? "",
+        currency: d.currency,
+        compilationMethod:
+          d.compilationMethod &&
+          (BUDGET_COMPILATION_METHODS as readonly string[]).includes(
+            d.compilationMethod
+          )
+            ? (d.compilationMethod as BudgetFormValues["compilationMethod"])
+            : null,
+        lines:
+          d.lines.length > 0
+            ? d.lines.map((l) => ({
+                clientKey: l.id,
+                subjectId: l.subjectId,
+                amount: String(l.amount ?? "0"),
+                amountYtd: l.amountYtd ?? "",
+                remark: l.remark ?? "",
+                departmentCode: l.departmentCode ?? "",
+                dimension1: l.dimension1 ?? "",
+                dimension2: l.dimension2 ?? "",
+              }))
+            : [emptyLine()],
+      })
+    } catch {
+      setLoadError("网络异常，请稍后重试")
+    } finally {
+      setDetailLoading(false)
     }
   }, [mode, budgetId, mockOrgId, mockUserId, mockUserRole, form])
+
+  React.useEffect(() => {
+    void loadBudgetDetail()
+  }, [loadBudgetDetail])
 
   async function persistDetail(
     values: BudgetFormValues,
@@ -733,6 +736,54 @@ export function BudgetForm({
       setSaving(false)
     }
   })
+
+  async function postDeleteBudget() {
+    const id = resolvedIdRef.current ?? budgetId
+    if (!id) return
+    setDeleteLoading(true)
+    try {
+      const res = await fetch(`/api/budget/${id}`, {
+        method: "DELETE",
+        headers: buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "删除失败")
+        return
+      }
+      toast.success("已删除预算")
+      setDeleteOpen(false)
+      router.push("/budget")
+    } catch {
+      toast.error("删除失败")
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  async function postWithdrawSubmission() {
+    const id = resolvedIdRef.current ?? budgetId
+    if (!id) return
+    setWithdrawLoading(true)
+    try {
+      const res = await fetch(`/api/budget/${id}/withdraw`, {
+        method: "POST",
+        headers: buildMockAuthHeaders(mockOrgId, mockUserId, mockUserRole),
+      })
+      const json = (await res.json()) as ApiSuccess<{ message?: string }> | ApiFail
+      if (!json.success) {
+        toast.error(json.error?.message ?? "撤回失败")
+        return
+      }
+      toast.success(json.data?.message ?? "已撤回提交")
+      setWithdrawOpen(false)
+      await loadBudgetDetail()
+    } catch {
+      toast.error("撤回失败")
+    } finally {
+      setWithdrawLoading(false)
+    }
+  }
 
   const onSubmitApproval = form.handleSubmit(async (values) => {
     if (!isEditable) return
@@ -851,6 +902,31 @@ export function BudgetForm({
             <FileSpreadsheetIcon className="size-4" />
             Excel 导入
           </Button>
+          {mode === "edit" && serverStatus === BudgetStatus.SUBMITTED ? (
+            <Can permission={Permission.BUDGET_SUBMIT}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={withdrawLoading || detailLoading}
+                onClick={() => setWithdrawOpen(true)}
+              >
+                撤回提交
+              </Button>
+            </Can>
+          ) : null}
+          {mode === "edit" && serverStatus === BudgetStatus.DRAFT ? (
+            <Can permission={Permission.BUDGET_DELETE}>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleteLoading || detailLoading || saving}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2Icon className="mr-2 size-4" />
+                删除预算
+              </Button>
+            </Can>
+          ) : null}
         </div>
       </div>
 
@@ -858,7 +934,13 @@ export function BudgetForm({
         <Alert>
           <AlertTitle>当前为只读</AlertTitle>
           <AlertDescription>
-            仅草稿或已驳回状态可编辑。您仍可查看明细与合计。
+            {serverStatus === BudgetStatus.SUBMITTED ? (
+              <>
+                已提交审批，暂不可编辑。如需修改请先使用右上角「撤回提交」回到草稿（任一节点已同意则无法撤回）。
+              </>
+            ) : (
+              <>仅草稿或已驳回状态可编辑。您仍可查看明细与合计。</>
+            )}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1426,6 +1508,69 @@ export function BudgetForm({
               onClick={applyExcelParsedLines}
             >
               替换当前明细
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除预算？</DialogTitle>
+            <DialogDescription>
+              将永久删除该草稿预算及全部明细，此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleteLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteLoading}
+              onClick={() => void postDeleteBudget()}
+            >
+              {deleteLoading ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : null}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认撤回提交</DialogTitle>
+            <DialogDescription>
+              将预算从「已提交」撤回到草稿，进行中的审批待办将被取消。若审批链上已有节点同意，将无法撤回。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setWithdrawOpen(false)}
+              disabled={withdrawLoading}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={withdrawLoading}
+              onClick={() => void postWithdrawSubmission()}
+            >
+              {withdrawLoading ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : null}
+              确认撤回
             </Button>
           </DialogFooter>
         </DialogContent>

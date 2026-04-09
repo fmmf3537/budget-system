@@ -12,6 +12,9 @@ describe("hasPermission", () => {
 
   it("denies VIEWER user management", () => {
     expect(hasPermission(UserRole.VIEWER, Permission.USER_MANAGE)).toBe(false)
+    expect(hasPermission(UserRole.VIEWER, Permission.CASH_PLAN_DELETE)).toBe(
+      false
+    )
   })
 
   it("grants BUDGET_MANAGER budget create and cash plan edit", () => {
@@ -21,6 +24,9 @@ describe("hasPermission", () => {
     expect(hasPermission(UserRole.BUDGET_MANAGER, Permission.CASH_PLAN_EDIT)).toBe(
       true
     )
+    expect(
+      hasPermission(UserRole.BUDGET_MANAGER, Permission.CASH_PLAN_DELETE)
+    ).toBe(true)
   })
 
   it("denies BUDGET_MANAGER approval approve", () => {
