@@ -15,7 +15,7 @@ test.describe("smoke", () => {
     expect(res?.ok()).toBeTruthy()
     await expect(page.getByText("辰航卓越", { exact: true }).first()).toBeVisible()
     await expect(page.getByText("西安辰航卓越科技有限公司").first()).toBeVisible()
-    await expect(page.getByText("用户登录", { exact: true })).toBeVisible()
+    await expect(page.getByText("用户登录", { exact: true }).first()).toBeVisible()
     await expect(page.getByLabel("邮箱")).toBeVisible()
     await expect(page.getByLabel("密码")).toBeVisible()
     await expect(page.getByRole("button", { name: "登录" })).toBeVisible()
