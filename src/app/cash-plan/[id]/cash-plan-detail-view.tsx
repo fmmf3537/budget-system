@@ -122,6 +122,7 @@ type SubPlanDetail = {
   scopeDepartmentCode: string
   name: string | null
   status: string
+  createdById: string | null
   approvalProcessId: string | null
   incomes: LineRow[]
   expenses: LineRow[]
@@ -1416,26 +1417,32 @@ export function CashPlanDetailView() {
                               </Button>
                               {s.status === "DRAFT" ? (
                                 <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => openSubPlanEdit(s)}
-                                  >
-                                    编辑
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => void actionSubPlan(s.id, "submit")}
-                                  >
-                                    提交
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => void actionSubPlan(s.id, "delete")}
-                                  >
-                                    删除
-                                  </Button>
+                                  {s.createdById === mockUserId ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openSubPlanEdit(s)}
+                                    >
+                                      编辑
+                                    </Button>
+                                  ) : null}
+                                  {s.createdById === mockUserId ? (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => void actionSubPlan(s.id, "submit")}
+                                    >
+                                      提交
+                                    </Button>
+                                  ) : null}
+                                  {s.createdById === mockUserId ? (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => void actionSubPlan(s.id, "delete")}
+                                    >
+                                      删除
+                                    </Button>
+                                  ) : null}
                                 </>
                               ) : null}
                               {s.status === "SUBMITTED" ? (

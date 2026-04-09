@@ -9,6 +9,7 @@ import { serializeCashPlanSubPlan } from "@/lib/api/cash-plan-serialize"
 import { validateSubPlanDepartmentScope } from "@/lib/api/cash-plan-department-scope"
 import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
+import { resolveActorUserId } from "@/lib/api/budget-queries"
 import { fail, fromZodError, ok } from "@/lib/api/response"
 import { Permission } from "@/lib/auth/permissions"
 
@@ -51,8 +52,15 @@ export async function PUT(request: Request, ctx: RouteCtx) {
     const auth = authOrErr
     const { subId } = await ctx.params
 
+    const actorId = await resolveActorUserId(auth)
+    if (!actorId) {
+      return fail("FORBIDDEN", "当前用户不存在，无法编辑子计划", 403)
+    }
     const existing = await findCashPlanSubPlanDetail(subId, auth.organizationId)
     if (!existing) return fail("NOT_FOUND", "子计划不存在或无权访问", 404)
+    if (existing.createdById !== actorId) {
+      return fail("FORBIDDEN", "仅子计划创建人可编辑", 403)
+    }
     if (existing.status !== CashPlanSubPlanStatus.DRAFT) {
       return fail("INVALID_STATE", "仅草稿子计划可编辑", 409)
     }
@@ -180,8 +188,15 @@ export async function DELETE(request: Request, ctx: RouteCtx) {
     const auth = authOrErr
     const { subId } = await ctx.params
 
+    const actorId = await resolveActorUserId(auth)
+    if (!actorId) {
+      return fail("FORBIDDEN", "当前用户不存在，无法删除子计划", 403)
+    }
     const existing = await findCashPlanSubPlanDetail(subId, auth.organizationId)
     if (!existing) return fail("NOT_FOUND", "子计划不存在或无权访问", 404)
+    if (existing.createdById !== actorId) {
+      return fail("FORBIDDEN", "仅子计划创建人可删除", 403)
+    }
     if (existing.status !== CashPlanSubPlanStatus.DRAFT) {
       return fail("INVALID_STATE", "仅草稿子计划可删除", 409)
     }

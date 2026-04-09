@@ -2,6 +2,7 @@ import { CashPlanSubPlanStatus, CashPlanStatus } from "@/generated/prisma/enums"
 import { prisma } from "@/lib/prisma"
 import { ENTITY_CASH_PLAN_SUB_PLAN } from "@/lib/api/approval-constants"
 import { startApprovalForEntity } from "@/lib/api/approval-workflow"
+import { resolveActorUserId } from "@/lib/api/budget-queries"
 import {
   findCashPlanHeaderOnly,
   findCashPlanSubPlanHeaderOnly,
@@ -23,8 +24,16 @@ export async function POST(request: Request, ctx: RouteCtx) {
     const auth = authOrErr
     const { subId } = await ctx.params
 
+    const actorId = await resolveActorUserId(auth)
+    if (!actorId) {
+      return fail("FORBIDDEN", "当前用户不存在，无法提交子计划", 403)
+    }
+
     const sub = await findCashPlanSubPlanHeaderOnly(subId, auth.organizationId)
     if (!sub) return fail("NOT_FOUND", "子计划不存在或无权访问", 404)
+    if (sub.createdById !== actorId) {
+      return fail("FORBIDDEN", "仅子计划创建人可提交", 403)
+    }
     const parent = await findCashPlanHeaderOnly(sub.parentHeaderId, auth.organizationId)
     if (!parent) return fail("NOT_FOUND", "主计划不存在或无权访问", 404)
     if (parent.status !== CashPlanStatus.DRAFT) {

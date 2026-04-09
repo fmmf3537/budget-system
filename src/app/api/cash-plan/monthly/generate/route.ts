@@ -1,4 +1,4 @@
-锘縤mport { prisma } from "@/lib/prisma"
+import { prisma } from "@/lib/prisma"
 import { cashPlanMonthlyGenerateBodySchema } from "@/lib/api/cash-plan-schemas"
 import { serializeCashPlanHeader } from "@/lib/api/cash-plan-serialize"
 import { planInclude } from "@/lib/api/cash-plan-queries"
@@ -40,8 +40,9 @@ export async function POST(request: Request) {
 
     const data = parsed.data
     if (!data.rootDepartmentCode?.trim()) {
-      return fail("VALIDATION_ERROR", "必须选择顶级部门范围", 400)
+      return fail("VALIDATION_ERROR", "Top-level department is required", 400)
     }
+
     const rootScope = await validateRootDepartmentCode(
       auth.organizationId,
       data.rootDepartmentCode
@@ -51,7 +52,6 @@ export async function POST(request: Request) {
     }
 
     const { start, end } = monthRange(data.month)
-
     const dup = await prisma.cashPlanHeader.findFirst({
       where: {
         organizationId: auth.organizationId,
@@ -90,3 +90,4 @@ export async function POST(request: Request) {
     return handleRouteError(e)
   }
 }
+
