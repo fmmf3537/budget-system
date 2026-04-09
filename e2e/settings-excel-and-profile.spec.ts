@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
+import { gotoWithRetry } from "./navigation-helpers"
+import { submitLoginWithCredentials } from "./login-helpers"
 
 const hasTestCreds =
   Boolean(process.env.TEST_USER_EMAIL) && Boolean(process.env.TEST_USER_PASSWORD)
@@ -9,23 +11,17 @@ async function login(page: Page) {
   const email = process.env.TEST_USER_EMAIL
   const password = process.env.TEST_USER_PASSWORD
   if (!email || !password) return
-  await page.goto("/login")
-  await page.getByLabel("邮箱").fill(email)
-  await page.getByLabel("密码").fill(password)
-  await page.getByRole("button", { name: "登录" }).click()
+  await submitLoginWithCredentials(page, email, password)
   await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
 }
 
 async function loginWith(page: Page, email: string, password: string) {
-  await page.goto("/login")
-  await page.getByLabel("邮箱").fill(email)
-  await page.getByLabel("密码").fill(password)
-  await page.getByRole("button", { name: "登录" }).click()
+  await submitLoginWithCredentials(page, email, password)
   await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
 }
 
 async function gotoOrSkipUnauthorized(page: Page, path: string) {
-  await page.goto(path)
+  await gotoWithRetry(page, path)
   if (page.url().includes("/unauthorized")) {
     test.skip(true, `Current test account has no access to ${path}`)
   }
@@ -54,9 +50,13 @@ test.describe("settings excel + profile e2e", () => {
     for (const p of pages) {
       await gotoOrSkipUnauthorized(page, p)
       await expect(page).toHaveURL(new RegExp(`${p}(?:\\?.*)?$`))
-      await expect(page.getByRole("button", { name: "导入 Excel" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "导入 Excel" }).first()).toBeVisible({
+        timeout: 30_000,
+      })
       await page.getByRole("button", { name: "导入 Excel" }).first().click()
-      await expect(page.getByRole("button", { name: "下载模板" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "下载模板" }).first()).toBeVisible({
+        timeout: 20_000,
+      })
       await page.keyboard.press("Escape")
     }
   })
@@ -66,9 +66,13 @@ test.describe("settings excel + profile e2e", () => {
     for (const p of pages) {
       await gotoOrSkipUnauthorized(page, p)
       await expect(page).toHaveURL(new RegExp(`${p}(?:\\?.*)?$`))
-      await expect(page.getByRole("button", { name: "导入 Excel" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "导入 Excel" }).first()).toBeVisible({
+        timeout: 30_000,
+      })
       await page.getByRole("button", { name: "导入 Excel" }).first().click()
-      await expect(page.getByRole("button", { name: "下载模板" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "下载模板" }).first()).toBeVisible({
+        timeout: 20_000,
+      })
       await page.keyboard.press("Escape")
     }
   })
@@ -76,7 +80,9 @@ test.describe("settings excel + profile e2e", () => {
   test("profile page updates password with validation messages", async ({ page }) => {
     await gotoOrSkipUnauthorized(page, "/settings/profile")
     await expect(page).toHaveURL(/\/settings\/profile(?:\?.*)?$/)
-    await expect(page.getByRole("heading", { name: "个人信息" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "个人信息" })).toBeVisible({
+      timeout: 30_000,
+    })
 
     await page.getByLabel("原密码").fill("wrong-password")
     await page.getByLabel("新密码（至少 8 位）").fill("NewPassw0rd!")

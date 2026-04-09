@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test"
+import { gotoWithRetry } from "./navigation-helpers"
+import { submitLoginWithCredentials } from "./login-helpers"
+
+const EXCEL_DIALOG_TIMEOUT = 20_000
 
 /**
  * Excel 导入/导出相关 UI（预算表单、主数据导出）。
@@ -35,17 +39,14 @@ test.describe("excel import/export UI", () => {
     if (!email || !password) return
 
     await context.clearCookies()
-    await page.goto("/login")
-    await page.getByLabel("邮箱").fill(email)
-    await page.getByLabel("密码").fill(password)
-    await page.getByRole("button", { name: "登录" }).click()
+    await submitLoginWithCredentials(page, email, password)
     await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
   })
 
   test("new budget page shows Excel export/import and import dialog", async ({
     page,
   }) => {
-    await page.goto("/budget/new")
+    await gotoWithRetry(page, "/budget/new")
     await expect(page).toHaveURL(/\/budget\/new(?:\?.*)?$/)
     await expect(
       page.getByRole("heading", { name: "新建预算" })
@@ -53,32 +54,29 @@ test.describe("excel import/export UI", () => {
 
     await expect(
       page.getByRole("button", { name: "Excel 导出" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
     await expect(
       page.getByRole("button", { name: "Excel 导入" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
 
     await page.getByRole("button", { name: "Excel 导入" }).click()
+    const excelDialog = page.getByRole("dialog", { name: "Excel 导入" })
+    await expect(excelDialog).toBeVisible({ timeout: EXCEL_DIALOG_TIMEOUT })
     await expect(
-      page.getByRole("dialog", { name: "Excel 导入" })
-    ).toBeVisible()
+      excelDialog.getByRole("button", { name: "下载空模板" })
+    ).toBeVisible({ timeout: EXCEL_DIALOG_TIMEOUT })
     await expect(
-      page.getByRole("button", { name: "下载空模板" })
-    ).toBeVisible()
+      excelDialog.getByRole("button", { name: "选择 Excel 文件" })
+    ).toBeVisible({ timeout: EXCEL_DIALOG_TIMEOUT })
     await expect(
-      page.getByRole("button", { name: "选择 Excel 文件" })
-    ).toBeVisible()
-    await expect(
-      page.getByRole("button", { name: "关闭" })
-    ).toBeVisible()
-    await page.getByRole("button", { name: "关闭" }).click()
-    await expect(
-      page.getByRole("dialog", { name: "Excel 导入" })
-    ).not.toBeVisible()
+      excelDialog.getByRole("button", { name: "关闭" })
+    ).toBeVisible({ timeout: EXCEL_DIALOG_TIMEOUT })
+    await excelDialog.getByRole("button", { name: "关闭" }).click()
+    await expect(excelDialog).not.toBeVisible({ timeout: EXCEL_DIALOG_TIMEOUT })
   })
 
   test("master data departments page shows export Excel", async ({ page }) => {
-    await page.goto("/settings/master-data/departments")
+    await gotoWithRetry(page, "/settings/master-data/departments")
     await expect(page).toHaveURL(/\/settings\/master-data\/departments(?:\?.*)?$/)
     await ensureSettingsManageRole(page)
     const forbidden = page.getByText("页面权限不足", { exact: true })
@@ -88,13 +86,13 @@ test.describe("excel import/export UI", () => {
     ).toBeVisible({ timeout: 60_000 })
     await expect(
       page.getByRole("button", { name: "导出 Excel" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
   })
 
   test("master data budget subjects page shows export Excel", async ({
     page,
   }) => {
-    await page.goto("/settings/master-data/budget-subjects")
+    await gotoWithRetry(page, "/settings/master-data/budget-subjects")
     await expect(page).toHaveURL(/\/settings\/master-data\/budget-subjects(?:\?.*)?$/)
     await ensureSettingsManageRole(page)
     const forbidden = page.getByText("页面权限不足", { exact: true })
@@ -104,11 +102,11 @@ test.describe("excel import/export UI", () => {
     ).toBeVisible({ timeout: 60_000 })
     await expect(
       page.getByRole("button", { name: "导出 Excel" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
   })
 
   test("master data dimensions page shows export Excel", async ({ page }) => {
-    await page.goto("/settings/master-data/dimensions")
+    await gotoWithRetry(page, "/settings/master-data/dimensions")
     await expect(page).toHaveURL(/\/settings\/master-data\/dimensions(?:\?.*)?$/)
     await ensureSettingsManageRole(page)
     const forbidden = page.getByText("页面权限不足", { exact: true })
@@ -124,7 +122,7 @@ test.describe("excel import/export UI", () => {
   test("master data cash plan categories page shows export Excel", async ({
     page,
   }) => {
-    await page.goto("/settings/master-data/cash-plan-categories")
+    await gotoWithRetry(page, "/settings/master-data/cash-plan-categories")
     await expect(page).toHaveURL(/\/settings\/master-data\/cash-plan-categories(?:\?.*)?$/)
     await ensureSettingsManageRole(page)
     const forbidden = page.getByText("页面权限不足", { exact: true })
@@ -140,7 +138,7 @@ test.describe("excel import/export UI", () => {
   test("cash plan list: detail shows Excel buttons when a plan exists", async ({
     page,
   }) => {
-    await page.goto("/cash-plan")
+    await gotoWithRetry(page, "/cash-plan")
     await expect(page).toHaveURL(/\/cash-plan(?:\?.*)?$/)
     await expect(
       page.getByRole("heading", { name: "资金计划" })
@@ -160,6 +158,6 @@ test.describe("excel import/export UI", () => {
     ).toBeVisible({ timeout: 30_000 })
     await expect(
       page.getByRole("button", { name: "Excel 导入" })
-    ).toBeVisible()
+    ).toBeVisible({ timeout: 30_000 })
   })
 })

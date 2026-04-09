@@ -13,6 +13,7 @@
     "test:all": "node scripts/run-test-suite.mjs",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:parallel": "playwright test --workers=4",
     "test:e2e:install": "playwright install chromium",
     "db:init-local": "powershell -ExecutionPolicy Bypass -File scripts/Init-LocalPostgres.ps1",
     "db:migrate": "prisma migrate deploy",

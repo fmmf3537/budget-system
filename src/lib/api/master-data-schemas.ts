@@ -6,6 +6,8 @@ export const budgetDepartmentCreateSchema = z.object({
   code: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(200),
   sortOrder: z.coerce.number().int().min(0).max(999_999).optional().default(0),
+  /** 上级部门 id；不传或 null 表示顶级 */
+  parentId: z.string().trim().min(1).nullable().optional(),
 })
 
 export const budgetDepartmentUpdateSchema = z
@@ -14,6 +16,8 @@ export const budgetDepartmentUpdateSchema = z
     name: z.string().trim().min(1).max(200).optional(),
     sortOrder: z.coerce.number().int().min(0).max(999_999).optional(),
     isActive: z.boolean().optional(),
+    /** 设为 null 表示改为顶级 */
+    parentId: z.union([z.string().trim().min(1), z.null()]).optional(),
   })
   .refine((o) => Object.keys(o).length > 0, {
     message: "至少需要提供一个可更新字段",

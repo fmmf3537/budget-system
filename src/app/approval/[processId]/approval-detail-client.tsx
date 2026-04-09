@@ -687,7 +687,7 @@ export function ApprovalDetailClient({ processId }: { processId: string }) {
                     </span>
                   </span>
                   <span>
-                    模拟调整后：{" "}
+                    调整后合计：{" "}
                     <span className="text-foreground font-medium tabular-nums">
                       {data.adjustmentDetail.comparison.totalAfter}
                     </span>

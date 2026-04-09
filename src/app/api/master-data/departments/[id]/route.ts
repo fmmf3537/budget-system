@@ -1,5 +1,6 @@
-import { prisma } from "@/lib/prisma"
+import { assertCanReparent } from "@/lib/api/budget-department-hierarchy"
 import { budgetDepartmentUpdateSchema } from "@/lib/api/master-data-schemas"
+import { prisma } from "@/lib/prisma"
 import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { fail, fromZodError, ok } from "@/lib/api/response"
@@ -41,6 +42,21 @@ export async function PUT(request: Request, ctx: RouteCtx) {
       if (dup) return fail("DUPLICATE", "编码已存在", 409)
     }
 
+    if (patch.parentId !== undefined) {
+      if (patch.parentId !== null) {
+        const p = await prisma.budgetDepartment.findFirst({
+          where: { id: patch.parentId, organizationId: auth.organizationId },
+        })
+        if (!p) return fail("VALIDATION_ERROR", "上级部门不存在", 400)
+      }
+      const rep = await assertCanReparent(
+        auth.organizationId,
+        id,
+        patch.parentId
+      )
+      if (!rep.ok) return fail("VALIDATION_ERROR", rep.message, 400)
+    }
+
     const updated = await prisma.budgetDepartment.update({
       where: { id },
       data: {
@@ -48,9 +64,11 @@ export async function PUT(request: Request, ctx: RouteCtx) {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
         ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(patch.parentId !== undefined ? { parentId: patch.parentId } : {}),
       },
       select: {
         id: true,
+        parentId: true,
         code: true,
         name: true,
         sortOrder: true,
@@ -83,6 +101,17 @@ export async function DELETE(request: Request, ctx: RouteCtx) {
     })
     if (refCount > 0) {
       return fail("INVALID_STATE", "该编码已被预算明细引用，无法删除", 409)
+    }
+
+    const childCount = await prisma.budgetDepartment.count({
+      where: { organizationId: auth.organizationId, parentId: id },
+    })
+    if (childCount > 0) {
+      return fail(
+        "INVALID_STATE",
+        "存在下级部门，请先删除或移走子部门后再删除",
+        409
+      )
     }
 
     await prisma.budgetDepartment.delete({ where: { id } })

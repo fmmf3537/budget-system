@@ -255,7 +255,7 @@ export default function ApprovalTodoPage() {
           </Button>
           <h1 className="text-2xl font-semibold tracking-tight">审批待办</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            当前模拟用户可处理的审批任务；支持批量同意。
+            当前账号可处理的审批任务；支持批量同意。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

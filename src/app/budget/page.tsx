@@ -116,9 +116,6 @@ export default function BudgetListPage() {
     (s) => s.compilationGranularityFilter
   )
   const periodUnitFilter = useBudgetStore((s) => s.periodUnitFilter)
-  const mockOrgId = useBudgetStore((s) => s.mockOrgId)
-  const mockUserId = useBudgetStore((s) => s.mockUserId)
-
   const setDraftNameQuery = useBudgetStore((s) => s.setDraftNameQuery)
   const setStatus = useBudgetStore((s) => s.setStatus)
   const setFiscalYear = useBudgetStore((s) => s.setFiscalYear)
@@ -126,8 +123,6 @@ export default function BudgetListPage() {
     (s) => s.setCompilationGranularityFilter
   )
   const setPeriodUnitFilter = useBudgetStore((s) => s.setPeriodUnitFilter)
-  const setMockOrgId = useBudgetStore((s) => s.setMockOrgId)
-  const setMockUserId = useBudgetStore((s) => s.setMockUserId)
   const applyFilters = useBudgetStore((s) => s.applyFilters)
   const fetchList = useBudgetStore((s) => s.fetchList)
   const goToPage = useBudgetStore((s) => s.goToPage)
@@ -174,7 +169,7 @@ export default function BudgetListPage() {
           <code className="rounded bg-muted px-1 py-0.5 text-xs">
             GET /api/budget
           </code>
-          ，组织与用户通过请求头模拟。
+          。
         </p>
       </div>
 
@@ -191,13 +186,11 @@ export default function BudgetListPage() {
         <CardHeader className="border-b">
           <CardTitle>筛选条件</CardTitle>
           <CardDescription>
-            按预算年度与编制粒度（月/季/年）筛选；组织、用户对应{" "}
-            <code className="text-xs">x-mock-org-id</code> /{" "}
-            <code className="text-xs">x-mock-user-id</code>。
+            按预算年度与编制粒度（月/季/年）筛选列表。
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <div className="grid gap-2">
               <Label htmlFor="bq-name">名称搜索</Label>
               <div className="relative">
@@ -351,24 +344,6 @@ export default function BudgetListPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="bq-org">组织（mock）</Label>
-              <Input
-                id="bq-org"
-                placeholder="x-mock-org-id"
-                value={mockOrgId}
-                onChange={(e) => setMockOrgId(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2 sm:col-span-2 xl:col-span-6">
-              <Label htmlFor="bq-user">用户（mock）</Label>
-              <Input
-                id="bq-user"
-                placeholder="x-mock-user-id，需与数据库 User.id 一致以便审批等"
-                value={mockUserId}
-                onChange={(e) => setMockUserId(e.target.value)}
-              />
-            </div>
           </div>
         </CardContent>
         <CardFooter className="flex flex-wrap gap-2 border-t bg-muted/30">
@@ -446,8 +421,13 @@ export default function BudgetListPage() {
                 ) : (
                   items.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="max-w-[200px] truncate font-medium">
-                        {row.name}
+                      <TableCell className="max-w-[200px]">
+                        <Link
+                          href={`/budget/${row.id}`}
+                          className="text-primary block max-w-full truncate font-medium hover:underline"
+                        >
+                          {row.name}
+                        </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {row.code ?? "—"}

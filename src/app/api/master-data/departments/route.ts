@@ -1,5 +1,6 @@
-import { prisma } from "@/lib/prisma"
+import { assertValidParentForNewChild } from "@/lib/api/budget-department-hierarchy"
 import { budgetDepartmentCreateSchema } from "@/lib/api/master-data-schemas"
+import { prisma } from "@/lib/prisma"
 import { requireAuth } from "@/lib/api/request-auth"
 import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
       orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
       select: {
         id: true,
+        parentId: true,
         code: true,
         name: true,
         sortOrder: true,
@@ -54,6 +56,15 @@ export async function POST(request: Request) {
     if (!parsed.success) return fromZodError(parsed.error)
 
     const d = parsed.data
+    const parentId = d.parentId ?? null
+    const parentOk = await assertValidParentForNewChild(
+      auth.organizationId,
+      parentId
+    )
+    if (!parentOk.ok) {
+      return fail("VALIDATION_ERROR", parentOk.message, 400)
+    }
+
     const dup = await prisma.budgetDepartment.findFirst({
       where: { organizationId: auth.organizationId, code: d.code },
     })
@@ -62,6 +73,7 @@ export async function POST(request: Request) {
     const row = await prisma.budgetDepartment.create({
       data: {
         organizationId: auth.organizationId,
+        parentId,
         code: d.code,
         name: d.name,
         sortOrder: d.sortOrder ?? 0,
@@ -69,6 +81,7 @@ export async function POST(request: Request) {
       },
       select: {
         id: true,
+        parentId: true,
         code: true,
         name: true,
         sortOrder: true,

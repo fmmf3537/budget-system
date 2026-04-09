@@ -8,12 +8,19 @@ const htmlDir = process.env.PW_HTML_DIR ?? "playwright-report"
 const jsonFile = process.env.PW_JSON_FILE ?? "playwright-results.json"
 const junitFile = process.env.PW_JUNIT_FILE ?? "playwright-junit.xml"
 
+/** 本地默认 1：单 next dev 时多 worker 易触发导航中断、对话框竞态。可通过 PW_WORKERS=4 加速。 */
+function playwrightWorkers(): number {
+  if (process.env.CI) return 1
+  const n = Number.parseInt(process.env.PW_WORKERS ?? "1", 10)
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
 export default defineConfig({
   testDir: "e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: playwrightWorkers(),
   reporter: [
     ["list"],
     ["html", { outputFolder: htmlDir, open: "never" }],
@@ -23,6 +30,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
+    navigationTimeout: 60_000,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

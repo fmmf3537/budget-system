@@ -7,6 +7,7 @@ import { RoutePageGuard } from "@/components/auth/route-page-guard"
 import { PageLoadingSkeleton } from "@/components/loading/page-loading-skeleton"
 
 import { Header } from "./header"
+import { InternalBetaNotice } from "./internal-beta-notice"
 import { Sidebar } from "./sidebar"
 import { Brand } from "@/components/brand/brand"
 
@@ -23,6 +24,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
+        <InternalBetaNotice variant="centered" />
         <main className="flex-1">{children}</main>
         <footer className="border-t py-6">
           <div className="text-muted-foreground mx-auto flex max-w-6xl flex-col gap-1 px-4 text-center text-xs sm:flex-row sm:items-center sm:justify-between sm:text-left">
@@ -41,6 +43,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <Header />
+        <InternalBetaNotice variant="full" />
         <main className="flex-1">
           <React.Suspense fallback={<PageLoadingSkeleton />}>
             <RoutePageGuard>{children}</RoutePageGuard>

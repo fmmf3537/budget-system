@@ -394,7 +394,7 @@ export function BudgetSubjectsAdminClient() {
         <AlertDescription className="space-y-2 text-sm">
           <p>
             管理预算科目需要「系统设置」权限（通常为{" "}
-            <strong>ADMIN</strong>）。请通过顶栏将模拟角色切换为管理员，或使用具备该权限的账号登录。
+            <strong>ADMIN</strong>）。请通过顶栏将角色切换为管理员，或使用具备该权限的账号登录。
           </p>
           <Button asChild variant="outline" size="sm">
             <Link href="/settings/master-data">返回主数据管理</Link>

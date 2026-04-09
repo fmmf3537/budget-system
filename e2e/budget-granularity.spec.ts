@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test"
+import { submitLoginWithCredentials } from "./login-helpers"
+import { gotoWithRetry } from "./navigation-helpers"
 
 /**
  * 预算编制粒度 UI 回归（对应手工清单：列表筛选、新建表单粒度与期间预览）。
@@ -23,10 +25,7 @@ test.describe("budget compilation granularity UI", () => {
     if (!email || !password) return
 
     await context.clearCookies()
-    await page.goto("/login")
-    await page.getByLabel("邮箱").fill(email)
-    await page.getByLabel("密码").fill(password)
-    await page.getByRole("button", { name: "登录" }).click()
+    await submitLoginWithCredentials(page, email, password)
     await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
   })
 
@@ -49,7 +48,7 @@ test.describe("budget compilation granularity UI", () => {
   test("new budget form: MONTHLY + March shows UTC period preview", async ({
     page,
   }) => {
-    await page.goto("/budget/new")
+    await gotoWithRetry(page, "/budget/new")
     await expect(page).toHaveURL(/\/budget\/new(?:\?.*)?$/)
     await expect(
       page.getByRole("heading", { name: "新建预算" })

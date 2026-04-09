@@ -24,7 +24,7 @@ export default async function UnauthorizedPage({ searchParams }: Props) {
         <CardHeader>
           <CardTitle>无权访问</CardTitle>
           <CardDescription>
-            当前模拟角色没有进入该页面的权限，请在顶栏切换角色或联系管理员。
+            当前账号没有进入该页面的权限，请切换角色或联系管理员。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

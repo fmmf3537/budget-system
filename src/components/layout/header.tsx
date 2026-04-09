@@ -220,39 +220,31 @@ export function Header() {
                   {initialsFromNameOrId(
                     sessionActive && profileDisplayName
                       ? profileDisplayName
-                      : mockUserId
+                      : "访客"
                   )}
                 </AvatarFallback>
               </Avatar>
               <span className="text-muted-foreground hidden max-w-[120px] truncate text-sm sm:inline">
                 {sessionActive && profileDisplayName
                   ? profileDisplayName
-                  : "未登录演示"}
+                  : "未登录"}
               </span>
               <UserIcon className="text-muted-foreground hidden size-4 sm:block" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuLabel>
-              {sessionActive ? "当前用户" : "演示身份（未登录）"}
+              {sessionActive ? "当前用户" : "未登录"}
             </DropdownMenuLabel>
-            <div className="text-muted-foreground space-y-1 px-2 py-1.5 text-xs">
-              <p className="break-all">
-                <span className="text-foreground font-medium">用户 ID</span>
-                <br />
-                {mockUserId}
-              </p>
-              <p className="break-all">
-                <span className="text-foreground font-medium">组织 ID</span>
-                <br />
-                {mockOrgId}
-              </p>
-              <p className="break-all">
-                <span className="text-foreground font-medium">当前角色</span>
-                <br />
-                {ROLE_LABEL[mockUserRole]}
-              </p>
-            </div>
+            {sessionActive ? (
+              <div className="text-muted-foreground px-2 py-1.5 text-xs">
+                <p>
+                  <span className="text-foreground font-medium">角色</span>
+                  <br />
+                  {ROLE_LABEL[mockUserRole]}
+                </p>
+              </div>
+            ) : null}
             {sessionActive ? (
               <>
                 <DropdownMenuSeparator />
@@ -269,7 +261,7 @@ export function Header() {
             ) : (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>切换模拟角色</DropdownMenuLabel>
+                <DropdownMenuLabel>切换角色</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={mockUserRole}
                   onValueChange={(v) => setMockUserRole(v as UserRoleType)}

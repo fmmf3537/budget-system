@@ -25,7 +25,7 @@ export function RoutePageGuard({ children }: { children: React.ReactNode }) {
         <Alert variant="destructive">
           <AlertTitle>页面权限不足</AlertTitle>
           <AlertDescription>
-            当前模拟角色不具备「{required}」。请通过顶栏切换到具备权限的角色。
+            当前角色不具备「{required}」。请通过顶栏切换到具备权限的角色，或使用有权限的账号登录。
           </AlertDescription>
         </Alert>
       </div>

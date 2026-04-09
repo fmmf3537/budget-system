@@ -45,6 +45,7 @@ describe("GET /api/master-data/departments", () => {
     vi.mocked(prismaMock.budgetDepartment.findMany).mockResolvedValue([
       {
         id: "d1",
+        parentId: null,
         code: "HQ",
         name: "总部",
         sortOrder: 0,

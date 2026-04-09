@@ -29,6 +29,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -37,6 +44,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useBudgetStore } from "@/stores/budget-store"
+
+const ROOT_PARENT_VALUE = "__root__"
 
 type ApiSuccess<T> = { success: true; data: T; error: null }
 type ApiFail = {
@@ -47,10 +56,68 @@ type ApiFail = {
 
 type Row = {
   id: string
+  parentId: string | null
   code: string
   name: string
   sortOrder: number
   isActive: boolean
+}
+
+/** 节点层级：顶级=1（最多三级） */
+function clientLevelOf(items: Row[], id: string): number {
+  let n = 1
+  let cur = items.find((x) => x.id === id)
+  while (cur?.parentId) {
+    n++
+    cur = items.find((x) => x.id === cur!.parentId)
+  }
+  return n
+}
+
+function descendantIds(items: Row[], rootId: string): Set<string> {
+  const byParent = new Map<string | null, Row[]>()
+  for (const r of items) {
+    const p = r.parentId ?? null
+    if (!byParent.has(p)) byParent.set(p, [])
+    byParent.get(p)!.push(r)
+  }
+  const out = new Set<string>()
+  function walk(xid: string) {
+    out.add(xid)
+    for (const c of byParent.get(xid) ?? []) walk(c.id)
+  }
+  walk(rootId)
+  return out
+}
+
+/** 以 id 为根的子树高度（含自身），与接口侧 subtreeHeight 一致 */
+function subtreeHeightClient(items: Row[], id: string): number {
+  const children = items.filter((r) => r.parentId === id)
+  if (children.length === 0) return 1
+  return 1 + Math.max(...children.map((c) => subtreeHeightClient(items, c.id)))
+}
+
+function flatTreeRows(items: Row[]): { row: Row; depth: number }[] {
+  const byParent = new Map<string | null, Row[]>()
+  for (const r of items) {
+    const p = r.parentId ?? null
+    if (!byParent.has(p)) byParent.set(p, [])
+    byParent.get(p)!.push(r)
+  }
+  for (const list of byParent.values()) {
+    list.sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code)
+    )
+  }
+  const out: { row: Row; depth: number }[] = []
+  function walk(parentId: string | null, depth: number) {
+    for (const r of byParent.get(parentId) ?? []) {
+      out.push({ row: r, depth })
+      walk(r.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  return out
 }
 
 export function BudgetDepartmentsAdminClient() {
@@ -77,10 +144,36 @@ export function BudgetDepartmentsAdminClient() {
   const [cCode, setCCode] = React.useState("")
   const [cName, setCName] = React.useState("")
   const [cSort, setCSort] = React.useState("0")
+  const [cParentId, setCParentId] = React.useState(ROOT_PARENT_VALUE)
   const [eCode, setECode] = React.useState("")
   const [eName, setEName] = React.useState("")
   const [eSort, setESort] = React.useState("0")
   const [eActive, setEActive] = React.useState(true)
+  const [eParentId, setEParentId] = React.useState(ROOT_PARENT_VALUE)
+
+  const treeRows = React.useMemo(() => flatTreeRows(items), [items])
+  const createParentCandidates = React.useMemo(
+    () => items.filter((r) => clientLevelOf(items, r.id) < 3),
+    [items]
+  )
+  const editExcluded = React.useMemo(() => {
+    if (!editRow) return new Set<string>()
+    return descendantIds(items, editRow.id)
+  }, [items, editRow])
+  const editParentCandidates = React.useMemo(() => {
+    if (!editRow) return []
+    const h = subtreeHeightClient(items, editRow.id)
+    return items.filter((r) => {
+      if (editExcluded.has(r.id)) return false
+      const anchor = clientLevelOf(items, r.id) + 1
+      return anchor + h - 1 <= 3
+    })
+  }, [items, editRow, editExcluded])
+
+  const codeById = React.useMemo(
+    () => new Map(items.map((x) => [x.id, x.code])),
+    [items]
+  )
 
   const loadIdRef = React.useRef(0)
 
@@ -106,7 +199,12 @@ export function BudgetDepartmentsAdminClient() {
         setItems([])
         return
       }
-      setItems(json.data.items)
+      setItems(
+        json.data.items.map((x) => ({
+          ...x,
+          parentId: x.parentId ?? null,
+        }))
+      )
     } catch {
       if (requestId !== loadIdRef.current) return
       toast.error("加载失败")
@@ -124,13 +222,15 @@ export function BudgetDepartmentsAdminClient() {
 
   async function exportExcel() {
     try {
+      const codeById = new Map(items.map((x) => [x.id, x.code]))
       const u8 = await writeSimpleExcelBuffer([
         {
           name: "部门成本中心",
-          headers: ["编码", "名称", "排序", "状态"],
+          headers: ["编码", "名称", "上级编码", "排序", "状态"],
           rows: items.map((r) => [
             r.code,
             r.name,
+            r.parentId ? (codeById.get(r.parentId) ?? "") : "",
             r.sortOrder,
             r.isActive ? "启用" : "停用",
           ]),
@@ -148,13 +248,13 @@ export function BudgetDepartmentsAdminClient() {
       const u8 = await writeSimpleExcelBuffer([
         {
           name: "部门成本中心",
-          headers: ["编码", "名称", "排序", "状态"],
+          headers: ["编码", "名称", "上级编码", "排序", "状态"],
           rows: [
-            ["D001", "总部", 10, "启用"],
-            ["D002", "销售中心", 20, "启用"],
-            ["D003", "研发中心", 30, "启用"],
-            ["D004", "运营支持", 40, "停用"],
-            ["D005", "华北区域", 50, "启用"],
+            ["D001", "总部", "", 10, "启用"],
+            ["D002", "销售中心", "D001", 20, "启用"],
+            ["D003", "研发中心", "D001", 30, "启用"],
+            ["D004", "运营支持", "", 40, "停用"],
+            ["D005", "华北销售部", "D002", 50, "启用"],
           ],
         },
       ])
@@ -181,44 +281,142 @@ export function BudgetDepartmentsAdminClient() {
       const nameIdx = first.headers.findIndex((h) => h === "名称")
       const sortIdx = first.headers.findIndex((h) => h === "排序")
       const statusIdx = first.headers.findIndex((h) => h === "状态")
+      const parentIdx = first.headers.findIndex(
+        (h) => h === "上级编码" || h === "上级"
+      )
       if (codeIdx < 0 || nameIdx < 0) {
         toast.error("模板不匹配：缺少「编码/名称」列")
         return
       }
 
-      const byCode = new Map(items.map((x) => [x.code, x]))
-      let createdCount = 0
-      let updatedCount = 0
+      type Parsed = {
+        code: string
+        name: string
+        parentCode: string | null
+        sortOrder: number
+        isActive: boolean
+      }
+      const parsed: Parsed[] = []
       for (const row of first.rows) {
         const code = (row[codeIdx] ?? "").trim()
         const name = (row[nameIdx] ?? "").trim()
         if (!code || !name) continue
         const sortOrder =
           sortIdx >= 0 ? Number.parseInt((row[sortIdx] ?? "").trim(), 10) || 0 : 0
-        const isActive = statusIdx >= 0 ? (row[statusIdx] ?? "").trim() !== "停用" : true
-        const old = byCode.get(code)
-        if (old) {
-          const res = await fetch(`/api/master-data/departments/${old.id}`, {
-            method: "PUT",
-            credentials: "include",
-            headers: { ...baseHeaders, "Content-Type": "application/json" },
-            body: JSON.stringify({ code, name, sortOrder, isActive }),
-          })
-          const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
-          if (!json.success) throw new Error(json.error.message)
-          updatedCount += 1
-        } else {
-          const res = await fetch("/api/master-data/departments", {
-            method: "POST",
-            credentials: "include",
-            headers: { ...baseHeaders, "Content-Type": "application/json" },
-            body: JSON.stringify({ code, name, sortOrder }),
-          })
-          const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
-          if (!json.success) throw new Error(json.error.message)
-          createdCount += 1
+        const isActive =
+          statusIdx >= 0 ? (row[statusIdx] ?? "").trim() !== "停用" : true
+        const pc =
+          parentIdx >= 0 ? (row[parentIdx] ?? "").trim() || null : null
+        parsed.push({ code, name, parentCode: pc, sortOrder, isActive })
+      }
+
+      const idByCode = new Map(items.map((x) => [x.code, x.id]))
+      let createdCount = 0
+      let updatedCount = 0
+
+      if (parentIdx < 0) {
+        const byCode = new Map(items.map((x) => [x.code, x]))
+        for (const pr of parsed) {
+          const old = byCode.get(pr.code)
+          if (old) {
+            const res = await fetch(`/api/master-data/departments/${old.id}`, {
+              method: "PUT",
+              credentials: "include",
+              headers: { ...baseHeaders, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code: pr.code,
+                name: pr.name,
+                sortOrder: pr.sortOrder,
+                isActive: pr.isActive,
+              }),
+            })
+            const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+            if (!json.success) throw new Error(json.error.message)
+            updatedCount += 1
+          } else {
+            const res = await fetch("/api/master-data/departments", {
+              method: "POST",
+              credentials: "include",
+              headers: { ...baseHeaders, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code: pr.code,
+                name: pr.name,
+                sortOrder: pr.sortOrder,
+                parentId: null,
+              }),
+            })
+            const json = (await res.json()) as ApiSuccess<{ id: string }> | ApiFail
+            if (!json.success) throw new Error(json.error.message)
+            idByCode.set(pr.code, json.data.id)
+            createdCount += 1
+          }
+        }
+      } else {
+        let pending = [...parsed]
+        let guard = 0
+        while (pending.length > 0 && guard < 500) {
+          guard += 1
+          const sizeBefore = pending.length
+          const next: Parsed[] = []
+          for (const pr of pending) {
+            const pc = pr.parentCode
+            if (pc && !idByCode.has(pc)) {
+              next.push(pr)
+              continue
+            }
+            const parentId = pc ? idByCode.get(pc) ?? null : null
+            if (pc && parentId == null) {
+              next.push(pr)
+              continue
+            }
+            const existingId = idByCode.get(pr.code)
+            if (existingId) {
+              const res = await fetch(
+                `/api/master-data/departments/${existingId}`,
+                {
+                  method: "PUT",
+                  credentials: "include",
+                  headers: { ...baseHeaders, "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    code: pr.code,
+                    name: pr.name,
+                    sortOrder: pr.sortOrder,
+                    isActive: pr.isActive,
+                    parentId,
+                  }),
+                }
+              )
+              const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
+              if (!json.success) throw new Error(json.error.message)
+              updatedCount += 1
+            } else {
+              const res = await fetch("/api/master-data/departments", {
+                method: "POST",
+                credentials: "include",
+                headers: { ...baseHeaders, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  code: pr.code,
+                  name: pr.name,
+                  sortOrder: pr.sortOrder,
+                  parentId,
+                }),
+              })
+              const json = (await res.json()) as ApiSuccess<{ id: string }> | ApiFail
+              if (!json.success) throw new Error(json.error.message)
+              idByCode.set(pr.code, json.data.id)
+              createdCount += 1
+            }
+          }
+          pending = next
+          if (pending.length === sizeBefore) break
+        }
+        if (pending.length > 0) {
+          throw new Error(
+            "部分行未导入：请检查「上级编码」是否在本表或系统中已存在，且不超过三级"
+          )
         }
       }
+
       await load()
       setImportOpen(false)
       toast.success(`导入完成：新增 ${createdCount}，更新 ${updatedCount}`)
@@ -233,6 +431,7 @@ export function BudgetDepartmentsAdminClient() {
     setCCode("")
     setCName("")
     setCSort("0")
+    setCParentId(ROOT_PARENT_VALUE)
     setCreateOpen(true)
   }
 
@@ -242,6 +441,7 @@ export function BudgetDepartmentsAdminClient() {
     setEName(row.name)
     setESort(String(row.sortOrder))
     setEActive(row.isActive)
+    setEParentId(row.parentId ?? ROOT_PARENT_VALUE)
   }
 
   async function submitCreate() {
@@ -255,6 +455,8 @@ export function BudgetDepartmentsAdminClient() {
           code: cCode.trim(),
           name: cName.trim(),
           sortOrder: Number.parseInt(cSort, 10) || 0,
+          parentId:
+            cParentId === ROOT_PARENT_VALUE ? null : cParentId,
         }),
       })
       const json = (await res.json()) as ApiSuccess<{ id: string }> | ApiFail
@@ -285,6 +487,8 @@ export function BudgetDepartmentsAdminClient() {
           name: eName.trim(),
           sortOrder: Number.parseInt(eSort, 10) || 0,
           isActive: eActive,
+          parentId:
+            eParentId === ROOT_PARENT_VALUE ? null : eParentId,
         }),
       })
       const json = (await res.json()) as ApiSuccess<unknown> | ApiFail
@@ -331,7 +535,7 @@ export function BudgetDepartmentsAdminClient() {
       <Alert variant="destructive">
         <AlertTitle>无权限</AlertTitle>
         <AlertDescription className="space-y-2 text-sm">
-          <p>需要系统设置权限（通常为 ADMIN）。请切换模拟角色或使用具备该权限的账号。</p>
+          <p>需要系统设置权限（通常为 ADMIN）。请切换角色或使用具备该权限的账号登录。</p>
           <Button asChild variant="outline" size="sm">
             <Link href="/settings/master-data">返回主数据管理</Link>
           </Button>
@@ -345,7 +549,7 @@ export function BudgetDepartmentsAdminClient() {
       <Alert>
         <AlertTitle>说明</AlertTitle>
         <AlertDescription className="text-sm">
-          编码写入预算明细「部门/成本中心」列；删除前需无预算行引用该编码。
+          支持最多三级树形结构（顶级→子级→孙级）；上级为空表示顶级。编码写入预算明细「部门/成本中心」列；删除前需无预算行引用，且不能有下级部门。
         </AlertDescription>
       </Alert>
 
@@ -381,6 +585,7 @@ export function BudgetDepartmentsAdminClient() {
               <TableRow>
                 <TableHead>编码</TableHead>
                 <TableHead>名称</TableHead>
+                <TableHead>上级编码</TableHead>
                 <TableHead className="text-center">排序</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="w-[100px] text-right">操作</TableHead>
@@ -390,17 +595,27 @@ export function BudgetDepartmentsAdminClient() {
               {items.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="text-muted-foreground h-24 text-center text-sm"
                   >
                     暂无数据，请新建或从编制页使用自由文本（未维护字典时）
                   </TableCell>
                 </TableRow>
               ) : (
-                items.map((row) => (
+                treeRows.map(({ row, depth }) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-mono text-sm">{row.code}</TableCell>
-                    <TableCell className="font-medium">{row.name}</TableCell>
+                    <TableCell
+                      className="font-medium"
+                      style={{ paddingLeft: `${12 + depth * 16}px` }}
+                    >
+                      {row.name}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-sm">
+                      {row.parentId
+                        ? (codeById.get(row.parentId) ?? "—")
+                        : "—"}
+                    </TableCell>
                     <TableCell className="text-center tabular-nums">
                       {row.sortOrder}
                     </TableCell>
@@ -445,9 +660,27 @@ export function BudgetDepartmentsAdminClient() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>新建部门/成本中心</DialogTitle>
-            <DialogDescription>编码在本组织内唯一。</DialogDescription>
+            <DialogDescription>
+              编码在本组织内唯一；第三级部门不可再选为别人的上级。
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="bd-c-parent">上级</Label>
+              <Select value={cParentId} onValueChange={setCParentId}>
+                <SelectTrigger id="bd-c-parent">
+                  <SelectValue placeholder="选择上级" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ROOT_PARENT_VALUE}>无（顶级）</SelectItem>
+                  {createParentCandidates.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.code} {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="bd-c-code">编码</Label>
               <Input
@@ -494,8 +727,27 @@ export function BudgetDepartmentsAdminClient() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>编辑</DialogTitle>
+            <DialogDescription>
+              调整上级时不能选自己或下级，且整棵子树深度不超过三级。
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="bd-e-parent">上级</Label>
+              <Select value={eParentId} onValueChange={setEParentId}>
+                <SelectTrigger id="bd-e-parent">
+                  <SelectValue placeholder="选择上级" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ROOT_PARENT_VALUE}>无（顶级）</SelectItem>
+                  {editParentCandidates.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.code} {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="bd-e-code">编码</Label>
               <Input
@@ -578,7 +830,9 @@ export function BudgetDepartmentsAdminClient() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>导入部门/成本中心</DialogTitle>
-            <DialogDescription>请先下载模板并按列填写，再上传 Excel 文件。</DialogDescription>
+            <DialogDescription>
+              模板含「上级编码」列，留空表示顶级；父子需在同一表中按依赖顺序填写，或先在系统中维护上级。整体不超过三级。
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:justify-between">
             <Button type="button" variant="outline" onClick={() => void downloadTemplate()}>

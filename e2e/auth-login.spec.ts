@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test"
+import { submitLoginWithCredentials } from "./login-helpers"
 
 const hasTestCreds =
   Boolean(process.env.TEST_USER_EMAIL) && Boolean(process.env.TEST_USER_PASSWORD)
@@ -11,10 +12,7 @@ test.describe("auth login", () => {
     const password = process.env.TEST_USER_PASSWORD
     if (!email || !password) return
 
-    await page.goto("/login")
-    await page.getByLabel("邮箱").fill(email)
-    await page.getByLabel("密码").fill(password)
-    await page.getByRole("button", { name: "登录" }).click()
+    await submitLoginWithCredentials(page, email, password)
 
     await expect(page).toHaveURL(/\/budget(?:\?.*)?$/)
 
