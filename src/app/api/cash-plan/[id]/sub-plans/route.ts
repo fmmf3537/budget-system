@@ -50,6 +50,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
             include: {
               incomes: { orderBy: { expectedDate: "asc" } },
               expenses: { orderBy: { expectedDate: "asc" } },
+              createdBy: { select: { id: true, name: true, email: true } },
             },
           })
     return ok({
@@ -155,6 +156,7 @@ export async function POST(request: Request, ctx: RouteCtx) {
         include: {
           incomes: { orderBy: { expectedDate: "asc" } },
           expenses: { orderBy: { expectedDate: "asc" } },
+          createdBy: { select: { id: true, name: true, email: true } },
         },
       })
     })

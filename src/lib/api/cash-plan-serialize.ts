@@ -18,6 +18,7 @@ export type CashPlanWithLines = CashPlanHeader & {
 export type CashPlanSubPlanWithLines = CashPlanSubPlan & {
   incomes: CashPlanSubPlanIncome[]
   expenses: CashPlanSubPlanExpense[]
+  createdBy?: { id: string; name: string; email: string } | null
 }
 
 export function serializeCashPlanIncome(row: CashPlanIncome) {
@@ -135,6 +136,7 @@ export function serializeCashPlanSubPlan(
     expenses: CashPlanSubPlanExpense[]
   }
 ) {
+  const row = s as CashPlanSubPlanWithLines
   return {
     id: s.id,
     organizationId: s.organizationId,
@@ -143,6 +145,8 @@ export function serializeCashPlanSubPlan(
     name: s.name,
     status: s.status,
     createdById: s.createdById,
+    createdByName: row.createdBy?.name ?? null,
+    createdByEmail: row.createdBy?.email ?? null,
     approvalProcessId: s.approvalProcessId,
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),

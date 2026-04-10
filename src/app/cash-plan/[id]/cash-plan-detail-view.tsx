@@ -94,6 +94,13 @@ const SEVERITY_LABEL: Record<string, string> = {
   [WarningSeverity.CRITICAL]: "严重",
 }
 
+const SUB_PLAN_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "草稿",
+  SUBMITTED: "已提交",
+  APPROVED: "已审批",
+  REJECTED: "已驳回",
+}
+
 type LineRow = {
   id: string
   category: string | null
@@ -123,6 +130,8 @@ type SubPlanDetail = {
   name: string | null
   status: string
   createdById: string | null
+  createdByName: string | null
+  createdByEmail: string | null
   approvalProcessId: string | null
   incomes: LineRow[]
   expenses: LineRow[]
@@ -140,6 +149,18 @@ type SubPlanLineDraft = {
   amount: string
   expectedDate: string
   remark: string
+}
+
+type LineSourceFilter = "ALL" | "MAIN_ONLY" | "SUBPLAN_ONLY"
+type SubPlanStatusFilter = "ALL" | "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"
+
+type DisplayLineRow = {
+  id: string
+  source: "MAIN" | "SUBPLAN"
+  sourceName: string
+  subPlanStatus: string | null
+  submitter: string
+  row: LineRow
 }
 
 type ForecastPayload = {
@@ -349,6 +370,13 @@ export function CashPlanDetailView() {
   >([])
   const [subPlanDraftDeptCode, setSubPlanDraftDeptCode] = React.useState("")
   const [subPlanCreateDeptCode, setSubPlanCreateDeptCode] = React.useState("")
+  const [lineSourceFilter, setLineSourceFilter] =
+    React.useState<LineSourceFilter>("ALL")
+  const [subPlanStatusFilter, setSubPlanStatusFilter] =
+    React.useState<SubPlanStatusFilter>("ALL")
+  const [submitterFilter, setSubmitterFilter] = React.useState("__all__")
+  const [lineDateFrom, setLineDateFrom] = React.useState("")
+  const [lineDateTo, setLineDateTo] = React.useState("")
 
   const [lineDialog, setLineDialog] = React.useState<
     | { kind: "income"; mode: "add" }
@@ -412,6 +440,127 @@ export function CashPlanDetailView() {
   })
 
   const editable = plan?.status === CashPlanStatus.DRAFT
+
+  const filteredSubPlansForLines = React.useMemo(() => {
+    if (subPlanStatusFilter === "ALL") return subPlans
+    return subPlans.filter((s) => s.status === subPlanStatusFilter)
+  }, [subPlans, subPlanStatusFilter])
+
+  const inflowBaseRows = React.useMemo<DisplayLineRow[]>(() => {
+    const mainRows: DisplayLineRow[] =
+      lineSourceFilter === "SUBPLAN_ONLY" || !plan
+        ? []
+        : plan.incomes.map((row) => ({
+            id: `main-income-${row.id}`,
+            source: "MAIN",
+            sourceName: "主计划",
+            subPlanStatus: null,
+            submitter: "主计划",
+            row,
+          }))
+    const subRows: DisplayLineRow[] =
+      lineSourceFilter === "MAIN_ONLY"
+        ? []
+        : filteredSubPlansForLines.flatMap((s) =>
+            s.incomes.map((row) => ({
+              id: `sub-income-${s.id}-${row.id}`,
+              source: "SUBPLAN",
+              sourceName: `${s.name?.trim() || "未命名子计划"} · ${s.scopeDepartmentCode}`,
+              subPlanStatus: s.status,
+              submitter:
+                s.createdByName?.trim() ||
+                s.createdByEmail?.trim() ||
+                s.createdById ||
+                "未知",
+              row,
+            }))
+          )
+    return [...mainRows, ...subRows].sort((a, b) => {
+      const ad = a.row.expectedDate ?? "9999-12-31"
+      const bd = b.row.expectedDate ?? "9999-12-31"
+      return ad.localeCompare(bd)
+    })
+  }, [filteredSubPlansForLines, lineSourceFilter, plan])
+
+  const outflowBaseRows = React.useMemo<DisplayLineRow[]>(() => {
+    const mainRows: DisplayLineRow[] =
+      lineSourceFilter === "SUBPLAN_ONLY" || !plan
+        ? []
+        : plan.expenses.map((row) => ({
+            id: `main-expense-${row.id}`,
+            source: "MAIN",
+            sourceName: "主计划",
+            subPlanStatus: null,
+            submitter: "主计划",
+            row,
+          }))
+    const subRows: DisplayLineRow[] =
+      lineSourceFilter === "MAIN_ONLY"
+        ? []
+        : filteredSubPlansForLines.flatMap((s) =>
+            s.expenses.map((row) => ({
+              id: `sub-expense-${s.id}-${row.id}`,
+              source: "SUBPLAN",
+              sourceName: `${s.name?.trim() || "未命名子计划"} · ${s.scopeDepartmentCode}`,
+              subPlanStatus: s.status,
+              submitter:
+                s.createdByName?.trim() ||
+                s.createdByEmail?.trim() ||
+                s.createdById ||
+                "未知",
+              row,
+            }))
+          )
+    return [...mainRows, ...subRows].sort((a, b) => {
+      const ad = a.row.expectedDate ?? "9999-12-31"
+      const bd = b.row.expectedDate ?? "9999-12-31"
+      return ad.localeCompare(bd)
+    })
+  }, [filteredSubPlansForLines, lineSourceFilter, plan])
+
+  const availableSubmitters = React.useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of [...inflowBaseRows, ...outflowBaseRows]) {
+      const key = r.submitter || "未知"
+      if (!m.has(key)) m.set(key, key)
+    }
+    return Array.from(m.values()).sort((a, b) => a.localeCompare(b))
+  }, [inflowBaseRows, outflowBaseRows])
+
+  const applyAdvancedLineFilters = React.useCallback(
+    (rows: DisplayLineRow[]) => {
+      return rows.filter((r) => {
+        if (submitterFilter !== "__all__" && r.submitter !== submitterFilter) {
+          return false
+        }
+        const d = isoDateOnly(r.row.expectedDate)
+        if (lineDateFrom) {
+          if (!d || d < lineDateFrom) return false
+        }
+        if (lineDateTo) {
+          if (!d || d > lineDateTo) return false
+        }
+        return true
+      })
+    },
+    [lineDateFrom, lineDateTo, submitterFilter]
+  )
+
+  const inflowDisplayRows = React.useMemo(
+    () => applyAdvancedLineFilters(inflowBaseRows),
+    [applyAdvancedLineFilters, inflowBaseRows]
+  )
+  const outflowDisplayRows = React.useMemo(
+    () => applyAdvancedLineFilters(outflowBaseRows),
+    [applyAdvancedLineFilters, outflowBaseRows]
+  )
+
+  React.useEffect(() => {
+    if (submitterFilter === "__all__") return
+    if (!availableSubmitters.includes(submitterFilter)) {
+      setSubmitterFilter("__all__")
+    }
+  }, [availableSubmitters, submitterFilter])
 
   const loadPlan = React.useCallback(async () => {
     if (!id) return
@@ -1404,6 +1553,7 @@ export function CashPlanDetailView() {
                     <TableRow>
                       <TableHead>名称</TableHead>
                       <TableHead>部门</TableHead>
+                      <TableHead>提交人</TableHead>
                       <TableHead>状态</TableHead>
                       <TableHead className="text-right">操作</TableHead>
                     </TableRow>
@@ -1411,14 +1561,14 @@ export function CashPlanDetailView() {
                   <TableBody>
                     {subPlanLoading ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="h-14 text-center">
+                        <TableCell colSpan={5} className="h-14 text-center">
                           <Loader2Icon className="mx-auto size-4 animate-spin" />
                         </TableCell>
                       </TableRow>
                     ) : subPlans.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={4}
+                          colSpan={5}
                           className="text-muted-foreground h-14 text-center"
                         >
                           暂无子计划
@@ -1429,6 +1579,12 @@ export function CashPlanDetailView() {
                         <TableRow key={s.id}>
                           <TableCell>{s.name?.trim() || "未命名子计划"}</TableCell>
                           <TableCell>{s.scopeDepartmentCode}</TableCell>
+                          <TableCell>
+                            {s.createdByName?.trim() ||
+                              s.createdByEmail?.trim() ||
+                              s.createdById ||
+                              "未知"}
+                          </TableCell>
                           <TableCell>
                             <Badge variant="outline">{s.status}</Badge>
                           </TableCell>
@@ -1497,19 +1653,81 @@ export function CashPlanDetailView() {
                 <div>
                   <CardTitle>资金流入明细</CardTitle>
                   <CardDescription>
-                    编制中可增删改（含已审批子计划汇总：{subPlanAgg?.totalInflow ?? "0"}）
+                    默认展示主计划 + 子计划全部流入，可按来源与子计划状态筛选。
                   </CardDescription>
                 </div>
-                {editable ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => openLineDialog({ kind: "income", mode: "add" })}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={lineSourceFilter}
+                    onValueChange={(v) => setLineSourceFilter(v as LineSourceFilter)}
                   >
-                    <PlusIcon className="mr-1 size-4" />
-                    新增
-                  </Button>
-                ) : null}
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue placeholder="来源范围" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">全部来源</SelectItem>
+                      <SelectItem value="MAIN_ONLY">仅主计划</SelectItem>
+                      <SelectItem value="SUBPLAN_ONLY">仅子计划</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={subPlanStatusFilter}
+                    onValueChange={(v) =>
+                      setSubPlanStatusFilter(v as SubPlanStatusFilter)
+                    }
+                  >
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue placeholder="子计划状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">全部状态</SelectItem>
+                      <SelectItem value="DRAFT">草稿</SelectItem>
+                      <SelectItem value="SUBMITTED">已提交</SelectItem>
+                      <SelectItem value="APPROVED">已审批</SelectItem>
+                      <SelectItem value="REJECTED">已驳回</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={submitterFilter}
+                    onValueChange={(v) => setSubmitterFilter(v)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="提交人" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">全部提交人</SelectItem>
+                      {availableSubmitters.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="date"
+                    value={lineDateFrom}
+                    onChange={(e) => setLineDateFrom(e.target.value)}
+                    className="w-[150px]"
+                    aria-label="开始日期"
+                  />
+                  <Input
+                    type="date"
+                    value={lineDateTo}
+                    onChange={(e) => setLineDateTo(e.target.value)}
+                    className="w-[150px]"
+                    aria-label="结束日期"
+                  />
+                  {editable ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => openLineDialog({ kind: "income", mode: "add" })}
+                    >
+                      <PlusIcon className="mr-1 size-4" />
+                      新增
+                    </Button>
+                  ) : null}
+                </div>
               </CardHeader>
               {subPlanAgg ? (
                 <CardContent className="border-b py-3 text-sm">
@@ -1525,40 +1743,54 @@ export function CashPlanDetailView() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>来源</TableHead>
+                      <TableHead>状态</TableHead>
                       <TableHead>类别</TableHead>
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
+                      <TableHead>提交人</TableHead>
                       <TableHead>备注</TableHead>
                       <TableHead className="w-[100px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {plan.incomes.length === 0 ? (
+                    {inflowDisplayRows.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={8}
                           className="text-muted-foreground h-16 text-center"
                         >
                           暂无流入明细
                         </TableCell>
                       </TableRow>
                     ) : (
-                      plan.incomes.map((row) => (
-                        <TableRow key={row.id}>
+                      inflowDisplayRows.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="text-sm">{r.sourceName}</TableCell>
                           <TableCell>
-                            {categoryDisplay(row.category, incomeCatMap)}
+                            <Badge variant="outline">
+                              {r.source === "MAIN"
+                                ? "主计划"
+                                : (SUB_PLAN_STATUS_LABEL[r.subPlanStatus ?? ""] ??
+                                  r.subPlanStatus ??
+                                  "—")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {categoryDisplay(r.row.category, incomeCatMap)}
                           </TableCell>
                           <TableCell className="tabular-nums text-sm">
-                            {isoDateOnly(row.expectedDate) || "—"}
+                            {isoDateOnly(r.row.expectedDate) || "—"}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {row.amount ?? "—"}
+                            {r.row.amount ?? "—"}
                           </TableCell>
-                          <TableCell className="text-muted-foreground max-w-[200px] truncate text-sm">
-                            {row.remark ?? "—"}
+                          <TableCell className="text-sm">{r.submitter}</TableCell>
+                          <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
+                            {r.row.remark ?? "—"}
                           </TableCell>
                           <TableCell>
-                            {editable ? (
+                            {editable && r.source === "MAIN" ? (
                               <div className="flex gap-1">
                                 <Button
                                   type="button"
@@ -1568,7 +1800,7 @@ export function CashPlanDetailView() {
                                     openLineDialog({
                                       kind: "income",
                                       mode: "edit",
-                                      row,
+                                      row: r.row,
                                     })
                                   }
                                   aria-label="编辑"
@@ -1580,7 +1812,7 @@ export function CashPlanDetailView() {
                                   variant="ghost"
                                   size="icon"
                                   className="text-destructive"
-                                  onClick={() => void deleteLine("income", row)}
+                                  onClick={() => void deleteLine("income", r.row)}
                                   aria-label="删除"
                                 >
                                   <Trash2Icon className="size-4" />
@@ -1603,21 +1835,83 @@ export function CashPlanDetailView() {
                 <div>
                   <CardTitle>资金流出明细</CardTitle>
                   <CardDescription>
-                    编制中可增删改（含已审批子计划汇总：{subPlanAgg?.totalOutflow ?? "0"}）
+                    默认展示主计划 + 子计划全部流出，可按来源与子计划状态筛选。
                   </CardDescription>
                 </div>
-                {editable ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() =>
-                      openLineDialog({ kind: "expense", mode: "add" })
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={lineSourceFilter}
+                    onValueChange={(v) => setLineSourceFilter(v as LineSourceFilter)}
+                  >
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue placeholder="来源范围" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">全部来源</SelectItem>
+                      <SelectItem value="MAIN_ONLY">仅主计划</SelectItem>
+                      <SelectItem value="SUBPLAN_ONLY">仅子计划</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={subPlanStatusFilter}
+                    onValueChange={(v) =>
+                      setSubPlanStatusFilter(v as SubPlanStatusFilter)
                     }
                   >
-                    <PlusIcon className="mr-1 size-4" />
-                    新增
-                  </Button>
-                ) : null}
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue placeholder="子计划状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">全部状态</SelectItem>
+                      <SelectItem value="DRAFT">草稿</SelectItem>
+                      <SelectItem value="SUBMITTED">已提交</SelectItem>
+                      <SelectItem value="APPROVED">已审批</SelectItem>
+                      <SelectItem value="REJECTED">已驳回</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={submitterFilter}
+                    onValueChange={(v) => setSubmitterFilter(v)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="提交人" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">全部提交人</SelectItem>
+                      {availableSubmitters.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="date"
+                    value={lineDateFrom}
+                    onChange={(e) => setLineDateFrom(e.target.value)}
+                    className="w-[150px]"
+                    aria-label="开始日期"
+                  />
+                  <Input
+                    type="date"
+                    value={lineDateTo}
+                    onChange={(e) => setLineDateTo(e.target.value)}
+                    className="w-[150px]"
+                    aria-label="结束日期"
+                  />
+                  {editable ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() =>
+                        openLineDialog({ kind: "expense", mode: "add" })
+                      }
+                    >
+                      <PlusIcon className="mr-1 size-4" />
+                      新增
+                    </Button>
+                  ) : null}
+                </div>
               </CardHeader>
               {subPlanAgg ? (
                 <CardContent className="border-b py-3 text-sm">
@@ -1633,40 +1927,54 @@ export function CashPlanDetailView() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>来源</TableHead>
+                      <TableHead>状态</TableHead>
                       <TableHead>类别</TableHead>
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
+                      <TableHead>提交人</TableHead>
                       <TableHead>备注</TableHead>
                       <TableHead className="w-[100px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {plan.expenses.length === 0 ? (
+                    {outflowDisplayRows.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={8}
                           className="text-muted-foreground h-16 text-center"
                         >
                           暂无流出明细
                         </TableCell>
                       </TableRow>
                     ) : (
-                      plan.expenses.map((row) => (
-                        <TableRow key={row.id}>
+                      outflowDisplayRows.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="text-sm">{r.sourceName}</TableCell>
                           <TableCell>
-                            {categoryDisplay(row.category, expenseCatMap)}
+                            <Badge variant="outline">
+                              {r.source === "MAIN"
+                                ? "主计划"
+                                : (SUB_PLAN_STATUS_LABEL[r.subPlanStatus ?? ""] ??
+                                  r.subPlanStatus ??
+                                  "—")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {categoryDisplay(r.row.category, expenseCatMap)}
                           </TableCell>
                           <TableCell className="tabular-nums text-sm">
-                            {isoDateOnly(row.expectedDate) || "—"}
+                            {isoDateOnly(r.row.expectedDate) || "—"}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {row.amount ?? "—"}
+                            {r.row.amount ?? "—"}
                           </TableCell>
-                          <TableCell className="text-muted-foreground max-w-[200px] truncate text-sm">
-                            {row.remark ?? "—"}
+                          <TableCell className="text-sm">{r.submitter}</TableCell>
+                          <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
+                            {r.row.remark ?? "—"}
                           </TableCell>
                           <TableCell>
-                            {editable ? (
+                            {editable && r.source === "MAIN" ? (
                               <div className="flex gap-1">
                                 <Button
                                   type="button"
@@ -1676,7 +1984,7 @@ export function CashPlanDetailView() {
                                     openLineDialog({
                                       kind: "expense",
                                       mode: "edit",
-                                      row,
+                                      row: r.row,
                                     })
                                   }
                                   aria-label="编辑"
@@ -1688,7 +1996,7 @@ export function CashPlanDetailView() {
                                   variant="ghost"
                                   size="icon"
                                   className="text-destructive"
-                                  onClick={() => void deleteLine("expense", row)}
+                                  onClick={() => void deleteLine("expense", r.row)}
                                   aria-label="删除"
                                 >
                                   <Trash2Icon className="size-4" />
@@ -2196,7 +2504,11 @@ export function CashPlanDetailView() {
             <DialogDescription>
               {viewingSubPlan?.name?.trim() || "未命名子计划"} · 部门{" "}
               {viewingSubPlan?.scopeDepartmentCode ?? "—"} · 状态{" "}
-              {viewingSubPlan?.status ?? "—"}
+              {viewingSubPlan?.status ?? "—"} · 提交人{" "}
+              {viewingSubPlan?.createdByName?.trim() ||
+                viewingSubPlan?.createdByEmail?.trim() ||
+                viewingSubPlan?.createdById ||
+                "未知"}
             </DialogDescription>
           </DialogHeader>
           {viewingSubPlan ? (
@@ -2211,6 +2523,7 @@ export function CashPlanDetailView() {
                       <TableHead>类别</TableHead>
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
+                      <TableHead>提交人</TableHead>
                       <TableHead>备注</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2218,7 +2531,7 @@ export function CashPlanDetailView() {
                     {viewingSubPlan.incomes.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={4}
+                          colSpan={5}
                           className="text-muted-foreground h-12 text-center"
                         >
                           无流入明细
@@ -2233,6 +2546,12 @@ export function CashPlanDetailView() {
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {r.amount ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {viewingSubPlan.createdByName?.trim() ||
+                              viewingSubPlan.createdByEmail?.trim() ||
+                              viewingSubPlan.createdById ||
+                              "未知"}
                           </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.remark ?? "—"}
@@ -2253,6 +2572,7 @@ export function CashPlanDetailView() {
                       <TableHead>类别</TableHead>
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
+                      <TableHead>提交人</TableHead>
                       <TableHead>备注</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2260,7 +2580,7 @@ export function CashPlanDetailView() {
                     {viewingSubPlan.expenses.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={4}
+                          colSpan={5}
                           className="text-muted-foreground h-12 text-center"
                         >
                           无流出明细
@@ -2275,6 +2595,12 @@ export function CashPlanDetailView() {
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {r.amount ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {viewingSubPlan.createdByName?.trim() ||
+                              viewingSubPlan.createdByEmail?.trim() ||
+                              viewingSubPlan.createdById ||
+                              "未知"}
                           </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.remark ?? "—"}

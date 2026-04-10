@@ -62,6 +62,7 @@ export { planInclude }
 const subPlanInclude = {
   incomes: { orderBy: { expectedDate: "asc" as const } },
   expenses: { orderBy: { expectedDate: "asc" as const } },
+  createdBy: { select: { id: true, name: true, email: true } },
 }
 
 export async function findCashPlanSubPlanDetail(
