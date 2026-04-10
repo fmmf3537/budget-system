@@ -13,6 +13,7 @@ import { Permission } from "@/lib/auth/permissions"
 import type { Prisma } from "@/generated/prisma/client"
 import { UserRole } from "@/lib/auth/roles"
 import { validateRootDepartmentCode } from "@/lib/api/cash-plan-department-scope"
+import { findConflictingCashPlanHeaderForDepartmentMonths } from "@/lib/api/cash-plan-master-month-conflict"
 
 function orderByFromQuery(
   sortBy: string,
@@ -114,6 +115,20 @@ export async function POST(request: Request) {
     )
     if (!rootScope.ok) {
       return fail("VALIDATION_ERROR", rootScope.message, 400)
+    }
+
+    const conflict = await findConflictingCashPlanHeaderForDepartmentMonths({
+      organizationId: auth.organizationId,
+      rootDepartmentCode: rootScope.code,
+      periodStart: ps,
+      periodEnd: pe,
+    })
+    if (conflict) {
+      return fail(
+        "DUPLICATE",
+        "该顶级部门在所选期间已存在主计划（同一日历月仅允许一条）",
+        409
+      )
     }
 
     const plan = await prisma.cashPlanHeader.create({

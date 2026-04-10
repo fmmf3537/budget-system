@@ -4,6 +4,7 @@ import { serializeCashPlanHeader } from "@/lib/api/cash-plan-serialize"
 import { planInclude } from "@/lib/api/cash-plan-queries"
 import { resolveActorUserId } from "@/lib/api/budget-queries"
 import { validateRootDepartmentCode } from "@/lib/api/cash-plan-department-scope"
+import { findConflictingCashPlanHeaderForDepartmentMonths } from "@/lib/api/cash-plan-master-month-conflict"
 import { requireAuth } from "@/lib/api/request-auth"
 import { handleRouteError } from "@/lib/api/prisma-errors"
 import { created, fail, fromZodError } from "@/lib/api/response"
@@ -52,14 +53,11 @@ export async function POST(request: Request) {
     }
 
     const { start, end } = monthRange(data.month)
-    const dup = await prisma.cashPlanHeader.findFirst({
-      where: {
-        organizationId: auth.organizationId,
-        periodStart: start,
-        periodEnd: end,
-        rootDepartmentCode: rootScope.code,
-      },
-      select: { id: true },
+    const dup = await findConflictingCashPlanHeaderForDepartmentMonths({
+      organizationId: auth.organizationId,
+      rootDepartmentCode: rootScope.code,
+      periodStart: start,
+      periodEnd: end,
     })
     if (dup) {
       return fail("DUPLICATE", "Master plan for this month/scope already exists", 409)

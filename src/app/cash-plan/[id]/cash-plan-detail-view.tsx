@@ -347,6 +347,8 @@ export function CashPlanDetailView() {
   const [subPlanDraftExpenses, setSubPlanDraftExpenses] = React.useState<
     SubPlanLineDraft[]
   >([])
+  const [subPlanDraftDeptCode, setSubPlanDraftDeptCode] = React.useState("")
+  const [subPlanCreateDeptCode, setSubPlanCreateDeptCode] = React.useState("")
 
   const [lineDialog, setLineDialog] = React.useState<
     | { kind: "income"; mode: "add" }
@@ -987,8 +989,8 @@ export function CashPlanDetailView() {
     }
   }
 
-  async function createSubPlan(deptCode: string) {
-    if (!id || !deptCode) return
+  async function createSubPlan(deptCode: string): Promise<boolean> {
+    if (!id || !deptCode) return false
     setSubPlanCreating(true)
     try {
       const res = await fetch(`/api/cash-plan/${id}/sub-plans`, {
@@ -1004,13 +1006,15 @@ export function CashPlanDetailView() {
       const json = (await res.json()) as ApiSuccess<SubPlanDetail> | ApiFail
       if (!json.success) {
         toast.error(json.error?.message ?? "创建子计划失败")
-        return
+        return false
       }
       toast.success("已创建子计划")
       await loadSubPlans()
       await loadSubPlanAggregate()
+      return true
     } catch {
       toast.error("创建子计划失败")
+      return false
     } finally {
       setSubPlanCreating(false)
     }
@@ -1041,6 +1045,7 @@ export function CashPlanDetailView() {
   function openSubPlanEdit(s: SubPlanDetail) {
     setEditingSubPlan(s)
     setSubPlanDraftName(s.name?.trim() || "")
+    setSubPlanDraftDeptCode(s.scopeDepartmentCode)
     setSubPlanDraftIncomes(s.incomes.map(mapLineToSubPlanDraft))
     setSubPlanDraftExpenses(s.expenses.map(mapLineToSubPlanDraft))
     setSubPlanEditOpen(true)
@@ -1071,7 +1076,7 @@ export function CashPlanDetailView() {
         headers: buildMockHeaders(mockOrgId, mockUserId, mockUserRole),
         body: JSON.stringify({
           name: subPlanDraftName.trim() || null,
-          scopeDepartmentCode: editingSubPlan.scopeDepartmentCode,
+          scopeDepartmentCode: subPlanDraftDeptCode.trim() || editingSubPlan.scopeDepartmentCode,
           incomes: normalize(subPlanDraftIncomes),
           expenses: normalize(subPlanDraftExpenses),
         }),
@@ -1352,13 +1357,12 @@ export function CashPlanDetailView() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Select
-                    onValueChange={(v) => {
-                      void createSubPlan(v)
-                    }}
+                    value={subPlanCreateDeptCode || undefined}
+                    onValueChange={(v) => setSubPlanCreateDeptCode(v)}
                     disabled={!editable || subPlanCreating || deptOpts.length === 0}
                   >
                     <SelectTrigger className="w-[320px]">
-                      <SelectValue placeholder="选择部门并创建子计划" />
+                      <SelectValue placeholder="选择部门（再点创建）" />
                     </SelectTrigger>
                     <SelectContent>
                       {deptOpts.map((d) => (
@@ -1368,10 +1372,32 @@ export function CashPlanDetailView() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={
+                      !editable ||
+                      !subPlanCreateDeptCode ||
+                      subPlanCreating ||
+                      deptOpts.length === 0
+                    }
+                    onClick={() => {
+                      void (async () => {
+                        const ok = await createSubPlan(subPlanCreateDeptCode)
+                        if (ok) setSubPlanCreateDeptCode("")
+                      })()
+                    }}
+                  >
+                    创建子计划
+                  </Button>
                   {subPlanCreating ? (
                     <Loader2Icon className="size-4 animate-spin" />
                   ) : null}
                 </div>
+                <p className="text-muted-foreground text-xs">
+                  此下拉仅用于<strong>新建</strong>
+                  子计划；修改已有子计划的部门请在「编辑」中调整（仅草稿）。
+                </p>
 
                 <Table>
                   <TableHeader>
@@ -2273,14 +2299,17 @@ export function CashPlanDetailView() {
         open={subPlanEditOpen}
         onOpenChange={(o) => {
           setSubPlanEditOpen(o)
-          if (!o) setEditingSubPlan(null)
+          if (!o) {
+            setEditingSubPlan(null)
+            setSubPlanDraftDeptCode("")
+          }
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>编辑子计划</DialogTitle>
             <DialogDescription>
-              仅草稿子计划可编辑；金额必须大于 0，日期必须在主计划期间内。
+              仅草稿子计划可编辑；金额必须大于 0，日期必须在主计划期间内。负责部门仅在草稿状态下可改；已提交后需先撤回再改。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2291,6 +2320,35 @@ export function CashPlanDetailView() {
                 onChange={(e) => setSubPlanDraftName(e.target.value)}
                 placeholder="子计划名称（可选）"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>负责部门</Label>
+              <Select
+                value={subPlanDraftDeptCode || undefined}
+                onValueChange={(v) => setSubPlanDraftDeptCode(v)}
+                disabled={
+                  subPlanSaving ||
+                  deptOpts.length === 0 ||
+                  editingSubPlan?.status !== "DRAFT"
+                }
+              >
+                <SelectTrigger className="w-full max-w-md">
+                  <SelectValue placeholder="选择部门" />
+                </SelectTrigger>
+                <SelectContent>
+                  {deptOpts.map((d) => (
+                    <SelectItem key={d.code} value={d.code}>
+                      {d.code} · {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {editingSubPlan?.status !== "DRAFT" ? (
+                <p className="text-muted-foreground text-xs">
+                  当前为 {editingSubPlan?.status} 状态，不可修改部门。
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">

@@ -13,6 +13,7 @@ import { fail, fromZodError, ok } from "@/lib/api/response"
 import { Permission } from "@/lib/auth/permissions"
 import { UserRole } from "@/lib/auth/roles"
 import { validateRootDepartmentCode } from "@/lib/api/cash-plan-department-scope"
+import { findConflictingCashPlanHeaderForDepartmentMonths } from "@/lib/api/cash-plan-master-month-conflict"
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -80,6 +81,26 @@ export async function PUT(request: Request, ctx: RouteCtx) {
     )
     if (!rootScope.ok) {
       return fail("VALIDATION_ERROR", rootScope.message, 400)
+    }
+
+    const nextRootCode =
+      patch.rootDepartmentCode !== undefined
+        ? rootScope.code
+        : existing.rootDepartmentCode
+
+    const conflict = await findConflictingCashPlanHeaderForDepartmentMonths({
+      organizationId: auth.organizationId,
+      rootDepartmentCode: nextRootCode,
+      periodStart: nextStart,
+      periodEnd: nextEnd,
+      excludeHeaderId: id,
+    })
+    if (conflict) {
+      return fail(
+        "DUPLICATE",
+        "该顶级部门在所选期间已存在主计划（同一日历月仅允许一条）",
+        409
+      )
     }
 
     await prisma.cashPlanHeader.update({
