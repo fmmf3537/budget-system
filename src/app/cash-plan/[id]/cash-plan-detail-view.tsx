@@ -158,7 +158,7 @@ type DisplayLineRow = {
   id: string
   source: "MAIN" | "SUBPLAN"
   sourceName: string
-  subPlanStatus: string | null
+  rowStatus: string | null
   submitter: string
   row: LineRow
 }
@@ -442,9 +442,8 @@ export function CashPlanDetailView() {
   const editable = plan?.status === CashPlanStatus.DRAFT
 
   const filteredSubPlansForLines = React.useMemo(() => {
-    if (subPlanStatusFilter === "ALL") return subPlans
-    return subPlans.filter((s) => s.status === subPlanStatusFilter)
-  }, [subPlans, subPlanStatusFilter])
+    return subPlans
+  }, [subPlans])
 
   const inflowBaseRows = React.useMemo<DisplayLineRow[]>(() => {
     const mainRows: DisplayLineRow[] =
@@ -454,7 +453,7 @@ export function CashPlanDetailView() {
             id: `main-income-${row.id}`,
             source: "MAIN",
             sourceName: "主计划",
-            subPlanStatus: null,
+            rowStatus: plan.status,
             submitter: "主计划",
             row,
           }))
@@ -466,7 +465,7 @@ export function CashPlanDetailView() {
               id: `sub-income-${s.id}-${row.id}`,
               source: "SUBPLAN",
               sourceName: `${s.name?.trim() || "未命名子计划"} · ${s.scopeDepartmentCode}`,
-              subPlanStatus: s.status,
+              rowStatus: s.status,
               submitter:
                 s.createdByName?.trim() ||
                 s.createdByEmail?.trim() ||
@@ -490,7 +489,7 @@ export function CashPlanDetailView() {
             id: `main-expense-${row.id}`,
             source: "MAIN",
             sourceName: "主计划",
-            subPlanStatus: null,
+            rowStatus: plan.status,
             submitter: "主计划",
             row,
           }))
@@ -502,7 +501,7 @@ export function CashPlanDetailView() {
               id: `sub-expense-${s.id}-${row.id}`,
               source: "SUBPLAN",
               sourceName: `${s.name?.trim() || "未命名子计划"} · ${s.scopeDepartmentCode}`,
-              subPlanStatus: s.status,
+              rowStatus: s.status,
               submitter:
                 s.createdByName?.trim() ||
                 s.createdByEmail?.trim() ||
@@ -530,6 +529,9 @@ export function CashPlanDetailView() {
   const applyAdvancedLineFilters = React.useCallback(
     (rows: DisplayLineRow[]) => {
       return rows.filter((r) => {
+        if (subPlanStatusFilter !== "ALL" && r.rowStatus !== subPlanStatusFilter) {
+          return false
+        }
         if (submitterFilter !== "__all__" && r.submitter !== submitterFilter) {
           return false
         }
@@ -543,7 +545,7 @@ export function CashPlanDetailView() {
         return true
       })
     },
-    [lineDateFrom, lineDateTo, submitterFilter]
+    [lineDateFrom, lineDateTo, submitterFilter, subPlanStatusFilter]
   )
 
   const inflowDisplayRows = React.useMemo(
@@ -1729,6 +1731,9 @@ export function CashPlanDetailView() {
                   ) : null}
                 </div>
               </CardHeader>
+              <CardContent className="border-b py-2 text-xs text-muted-foreground">
+                当前筛选命中 {inflowDisplayRows.length} 条流入明细
+              </CardContent>
               {subPlanAgg ? (
                 <CardContent className="border-b py-3 text-sm">
                   <div className="text-muted-foreground">
@@ -1771,8 +1776,8 @@ export function CashPlanDetailView() {
                             <Badge variant="outline">
                               {r.source === "MAIN"
                                 ? "主计划"
-                                : (SUB_PLAN_STATUS_LABEL[r.subPlanStatus ?? ""] ??
-                                  r.subPlanStatus ??
+                                : (SUB_PLAN_STATUS_LABEL[r.rowStatus ?? ""] ??
+                                  r.rowStatus ??
                                   "—")}
                             </Badge>
                           </TableCell>
@@ -1913,6 +1918,9 @@ export function CashPlanDetailView() {
                   ) : null}
                 </div>
               </CardHeader>
+              <CardContent className="border-b py-2 text-xs text-muted-foreground">
+                当前筛选命中 {outflowDisplayRows.length} 条流出明细
+              </CardContent>
               {subPlanAgg ? (
                 <CardContent className="border-b py-3 text-sm">
                   <div className="text-muted-foreground">
@@ -1955,8 +1963,8 @@ export function CashPlanDetailView() {
                             <Badge variant="outline">
                               {r.source === "MAIN"
                                 ? "主计划"
-                                : (SUB_PLAN_STATUS_LABEL[r.subPlanStatus ?? ""] ??
-                                  r.subPlanStatus ??
+                                : (SUB_PLAN_STATUS_LABEL[r.rowStatus ?? ""] ??
+                                  r.rowStatus ??
                                   "—")}
                             </Badge>
                           </TableCell>
