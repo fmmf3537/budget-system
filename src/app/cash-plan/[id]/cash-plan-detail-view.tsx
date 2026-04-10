@@ -441,9 +441,14 @@ export function CashPlanDetailView() {
 
   const editable = plan?.status === CashPlanStatus.DRAFT
 
+  const visibleSubPlansForLines = React.useMemo(() => {
+    if (isAdmin) return subPlans
+    return subPlans.filter((s) => s.createdById === mockUserId)
+  }, [isAdmin, mockUserId, subPlans])
+
   const filteredSubPlansForLines = React.useMemo(() => {
-    return subPlans
-  }, [subPlans])
+    return visibleSubPlansForLines
+  }, [visibleSubPlansForLines])
 
   const inflowBaseRows = React.useMemo<DisplayLineRow[]>(() => {
     const mainRows: DisplayLineRow[] =
@@ -734,8 +739,8 @@ export function CashPlanDetailView() {
   }, [id, mockOrgId, mockUserId, mockUserRole])
 
   React.useEffect(() => {
-    if (plan) void loadForecast()
-  }, [plan, loadForecast])
+    if (isAdmin && plan) void loadForecast()
+  }, [isAdmin, plan, loadForecast])
 
   React.useEffect(() => {
     void loadSubPlans()
@@ -1384,24 +1389,26 @@ export function CashPlanDetailView() {
           加载中…
         </div>
       ) : plan ? (
-        <Tabs defaultValue="basic" className="gap-4">
+        <Tabs defaultValue={isAdmin ? "basic" : "subplans"} className="gap-4">
           <TabsList className="flex flex-wrap h-auto min-h-10">
-            <TabsTrigger value="basic">基本信息</TabsTrigger>
+            {isAdmin ? <TabsTrigger value="basic">基本信息</TabsTrigger> : null}
             <TabsTrigger value="subplans">月度子计划</TabsTrigger>
             <TabsTrigger value="inflow">资金流入</TabsTrigger>
             <TabsTrigger value="outflow">资金流出</TabsTrigger>
-            <TabsTrigger value="forecast">现金流预测</TabsTrigger>
-            <TabsTrigger
-              value="warnings"
-              onClick={() => {
-                void loadWarnings()
-              }}
-            >
-              预警
-            </TabsTrigger>
+            {isAdmin ? <TabsTrigger value="forecast">现金流预测</TabsTrigger> : null}
+            {isAdmin ? (
+              <TabsTrigger
+                value="warnings"
+                onClick={() => {
+                  void loadWarnings()
+                }}
+              >
+                预警
+              </TabsTrigger>
+            ) : null}
           </TabsList>
 
-          <TabsContent value="basic">
+          {isAdmin ? <TabsContent value="basic">
             <Card>
               <CardHeader>
                 <CardTitle>基本信息</CardTitle>
@@ -1463,7 +1470,7 @@ export function CashPlanDetailView() {
                 </Form>
               </CardContent>
             </Card>
-          </TabsContent>
+          </TabsContent> : null}
 
           <TabsContent value="subplans">
             <Card>
@@ -1657,6 +1664,11 @@ export function CashPlanDetailView() {
                   <CardDescription>
                     默认展示主计划 + 子计划全部流入，可按来源与子计划状态筛选。
                   </CardDescription>
+                  {!isAdmin ? (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      非管理员仅展示您本人发起子计划的流入明细。
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select
@@ -1842,6 +1854,11 @@ export function CashPlanDetailView() {
                   <CardDescription>
                     默认展示主计划 + 子计划全部流出，可按来源与子计划状态筛选。
                   </CardDescription>
+                  {!isAdmin ? (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      非管理员仅展示您本人发起子计划的流出明细。
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select
@@ -2021,7 +2038,7 @@ export function CashPlanDetailView() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="forecast">
+          {isAdmin ? <TabsContent value="forecast">
             <div className="space-y-4">
               <Card>
                 <CardHeader>
@@ -2219,9 +2236,9 @@ export function CashPlanDetailView() {
                 </Card>
               ) : null}
             </div>
-          </TabsContent>
+          </TabsContent> : null}
 
-          <TabsContent value="warnings">
+          {isAdmin ? <TabsContent value="warnings">
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
                 <div>
@@ -2304,7 +2321,7 @@ export function CashPlanDetailView() {
                 </Table>
               </CardContent>
             </Card>
-          </TabsContent>
+          </TabsContent> : null}
         </Tabs>
       ) : null}
 
