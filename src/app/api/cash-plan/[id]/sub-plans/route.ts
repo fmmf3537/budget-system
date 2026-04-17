@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/cash-plan-queries"
 import { serializeCashPlanSubPlan } from "@/lib/api/cash-plan-serialize"
 import { validateSubPlanDepartmentScope } from "@/lib/api/cash-plan-department-scope"
+import { uploadCashPlanAttachment } from "@/lib/api/cash-plan-attachments"
 import { resolveActorUserId } from "@/lib/api/budget-queries"
 import { requireApiPermission } from "@/lib/api/require-permission"
 import { handleRouteError } from "@/lib/api/prisma-errors"
@@ -115,6 +116,131 @@ export async function POST(request: Request, ctx: RouteCtx) {
 
     const actorId = await resolveActorUserId(auth)
 
+    let resolvedIncomes: Array<{
+      category: string | null
+      amount: string
+      expectedDate: Date | null
+      remark: string | null
+      attachmentName: string | null
+      attachmentMime: string | null
+      attachmentUrl: string | null
+      attachmentSize: number | null
+    }> = []
+    let resolvedExpenses: Array<{
+      category: string | null
+      amount: string
+      expectedDate: Date | null
+      remark: string | null
+      attachmentName: string | null
+      attachmentMime: string | null
+      attachmentUrl: string | null
+      attachmentSize: number | null
+    }> = []
+    try {
+      resolvedIncomes = await Promise.all(
+        d.incomes.map(async (r) => {
+        if (!r.attachment) {
+          return {
+            category: r.category ?? null,
+            amount: r.amount,
+            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+            remark: r.remark ?? null,
+            attachmentName: null as string | null,
+            attachmentMime: null as string | null,
+            attachmentUrl: null as string | null,
+            attachmentSize: null as number | null,
+          }
+        }
+        if (r.attachment.dataBase64) {
+          const uploaded = await uploadCashPlanAttachment({
+            organizationId: auth.organizationId,
+            docId: id,
+            lineType: "sub-income",
+            attachment: {
+              name: r.attachment.name,
+              mime: r.attachment.mime ?? null,
+              dataBase64: r.attachment.dataBase64,
+            },
+          })
+          return {
+            category: r.category ?? null,
+            amount: r.amount,
+            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+            remark: r.remark ?? null,
+            attachmentName: uploaded.attachmentName,
+            attachmentMime: uploaded.attachmentMime,
+            attachmentUrl: uploaded.attachmentUrl,
+            attachmentSize: uploaded.attachmentSize,
+          }
+        }
+        return {
+          category: r.category ?? null,
+          amount: r.amount,
+          expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+          remark: r.remark ?? null,
+          attachmentName: r.attachment.name,
+          attachmentMime: r.attachment.mime ?? null,
+          attachmentUrl: r.attachment.url ?? null,
+          attachmentSize: r.attachment.size ?? null,
+        }
+        })
+      )
+      resolvedExpenses = await Promise.all(
+        d.expenses.map(async (r) => {
+        if (!r.attachment) {
+          return {
+            category: r.category ?? null,
+            amount: r.amount,
+            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+            remark: r.remark ?? null,
+            attachmentName: null as string | null,
+            attachmentMime: null as string | null,
+            attachmentUrl: null as string | null,
+            attachmentSize: null as number | null,
+          }
+        }
+        if (r.attachment.dataBase64) {
+          const uploaded = await uploadCashPlanAttachment({
+            organizationId: auth.organizationId,
+            docId: id,
+            lineType: "sub-expense",
+            attachment: {
+              name: r.attachment.name,
+              mime: r.attachment.mime ?? null,
+              dataBase64: r.attachment.dataBase64,
+            },
+          })
+          return {
+            category: r.category ?? null,
+            amount: r.amount,
+            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+            remark: r.remark ?? null,
+            attachmentName: uploaded.attachmentName,
+            attachmentMime: uploaded.attachmentMime,
+            attachmentUrl: uploaded.attachmentUrl,
+            attachmentSize: uploaded.attachmentSize,
+          }
+        }
+        return {
+          category: r.category ?? null,
+          amount: r.amount,
+          expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
+          remark: r.remark ?? null,
+          attachmentName: r.attachment.name,
+          attachmentMime: r.attachment.mime ?? null,
+          attachmentUrl: r.attachment.url ?? null,
+          attachmentSize: r.attachment.size ?? null,
+        }
+        })
+      )
+    } catch (e) {
+      return fail(
+        "VALIDATION_ERROR",
+        e instanceof Error ? e.message : "附件上传失败",
+        400
+      )
+    }
+
     const row = await prisma.$transaction(async (tx) => {
       const sub = await tx.cashPlanSubPlan.create({
         data: {
@@ -127,26 +253,34 @@ export async function POST(request: Request, ctx: RouteCtx) {
         },
       })
 
-      if (d.incomes.length > 0) {
+      if (resolvedIncomes.length > 0) {
         await tx.cashPlanSubPlanIncome.createMany({
-          data: d.incomes.map((r) => ({
+          data: resolvedIncomes.map((r) => ({
             subPlanId: sub.id,
-            category: r.category ?? null,
+            category: r.category,
             amount: r.amount,
-            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
-            remark: r.remark ?? null,
+            expectedDate: r.expectedDate,
+            remark: r.remark,
+            attachmentName: r.attachmentName,
+            attachmentMime: r.attachmentMime,
+            attachmentUrl: r.attachmentUrl,
+            attachmentSize: r.attachmentSize,
           })),
         })
       }
 
-      if (d.expenses.length > 0) {
+      if (resolvedExpenses.length > 0) {
         await tx.cashPlanSubPlanExpense.createMany({
-          data: d.expenses.map((r) => ({
+          data: resolvedExpenses.map((r) => ({
             subPlanId: sub.id,
-            category: r.category ?? null,
+            category: r.category,
             amount: r.amount,
-            expectedDate: r.expectedDate ? new Date(r.expectedDate) : null,
-            remark: r.remark ?? null,
+            expectedDate: r.expectedDate,
+            remark: r.remark,
+            attachmentName: r.attachmentName,
+            attachmentMime: r.attachmentMime,
+            attachmentUrl: r.attachmentUrl,
+            attachmentSize: r.attachmentSize,
           })),
         })
       }

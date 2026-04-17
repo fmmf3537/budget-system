@@ -29,6 +29,10 @@ export function serializeCashPlanIncome(row: CashPlanIncome) {
     amount: serializeDecimal(row.amount),
     expectedDate: row.expectedDate?.toISOString() ?? null,
     remark: row.remark,
+    attachmentName: row.attachmentName,
+    attachmentMime: row.attachmentMime,
+    attachmentUrl: row.attachmentUrl,
+    attachmentSize: row.attachmentSize,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -42,6 +46,10 @@ export function serializeCashPlanExpense(row: CashPlanExpense) {
     amount: serializeDecimal(row.amount),
     expectedDate: row.expectedDate?.toISOString() ?? null,
     remark: row.remark,
+    attachmentName: row.attachmentName,
+    attachmentMime: row.attachmentMime,
+    attachmentUrl: row.attachmentUrl,
+    attachmentSize: row.attachmentSize,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -111,6 +119,10 @@ export function serializeCashPlanSubPlanIncome(row: CashPlanSubPlanIncome) {
     amount: serializeDecimal(row.amount),
     expectedDate: row.expectedDate?.toISOString() ?? null,
     remark: row.remark,
+    attachmentName: row.attachmentName,
+    attachmentMime: row.attachmentMime,
+    attachmentUrl: row.attachmentUrl,
+    attachmentSize: row.attachmentSize,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -124,6 +136,10 @@ export function serializeCashPlanSubPlanExpense(row: CashPlanSubPlanExpense) {
     amount: serializeDecimal(row.amount),
     expectedDate: row.expectedDate?.toISOString() ?? null,
     remark: row.remark,
+    attachmentName: row.attachmentName,
+    attachmentMime: row.attachmentMime,
+    attachmentUrl: row.attachmentUrl,
+    attachmentSize: row.attachmentSize,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }

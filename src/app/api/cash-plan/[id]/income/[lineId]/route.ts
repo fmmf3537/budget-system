@@ -1,6 +1,7 @@
 import { CashPlanStatus } from "@/generated/prisma/enums"
 import { prisma } from "@/lib/prisma"
 import { cashPlanLinePatchSchema } from "@/lib/api/cash-plan-schemas"
+import { uploadCashPlanAttachment } from "@/lib/api/cash-plan-attachments"
 import {
   findCashPlanHeaderOnly,
   findCashPlanIncomeLine,
@@ -43,6 +44,51 @@ export async function PUT(request: Request, ctx: RouteCtx) {
     if (!parsed.success) return fromZodError(parsed.error)
 
     const p = parsed.data
+    let attachmentPatch:
+      | {
+          attachmentName: string | null
+          attachmentMime: string | null
+          attachmentUrl: string | null
+          attachmentSize: number | null
+        }
+      | null = null
+    if (p.attachment === null) {
+      attachmentPatch = {
+        attachmentName: null,
+        attachmentMime: null,
+        attachmentUrl: null,
+        attachmentSize: null,
+      }
+    } else if (p.attachment !== undefined) {
+      if (!p.attachment.dataBase64) {
+        return fail("VALIDATION_ERROR", "附件缺少 dataBase64 内容", 400)
+      }
+      try {
+        const uploaded = await uploadCashPlanAttachment({
+          organizationId: auth.organizationId,
+          docId: headerId,
+          lineType: "income",
+          attachment: {
+            name: p.attachment.name,
+            mime: p.attachment.mime ?? null,
+            dataBase64: p.attachment.dataBase64,
+          },
+        })
+        attachmentPatch = {
+          attachmentName: uploaded.attachmentName,
+          attachmentMime: uploaded.attachmentMime,
+          attachmentUrl: uploaded.attachmentUrl,
+          attachmentSize: uploaded.attachmentSize,
+        }
+      } catch (e) {
+        return fail(
+          "VALIDATION_ERROR",
+          e instanceof Error ? e.message : "附件上传失败",
+          400
+        )
+      }
+    }
+
     const row = await prisma.cashPlanIncome.update({
       where: { id: lineId },
       data: {
@@ -56,6 +102,7 @@ export async function PUT(request: Request, ctx: RouteCtx) {
             }
           : {}),
         ...(p.remark !== undefined ? { remark: p.remark } : {}),
+        ...(attachmentPatch !== null ? attachmentPatch : {}),
       },
     })
 

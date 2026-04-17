@@ -9,6 +9,18 @@ const optionalIsoDateTime = z
 
 const money = z.union([z.number(), z.string()]).transform((v) => String(v))
 
+const lineAttachmentSchema = z
+  .object({
+  name: z.string().trim().min(1).max(255),
+  mime: z.string().trim().max(255).optional().nullable(),
+  dataBase64: z.string().min(1).optional(),
+  url: z.string().url().optional(),
+  size: z.coerce.number().int().min(0).optional().nullable(),
+  })
+  .refine((o) => Boolean(o.dataBase64 || o.url), {
+    message: "附件需包含 dataBase64 或 url",
+  })
+
 export const cashPlanListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
@@ -54,6 +66,7 @@ export const cashPlanLineBodySchema = z.object({
   amount: money,
   expectedDate: optionalIsoDateTime,
   remark: z.string().trim().max(500).optional().nullable(),
+  attachment: lineAttachmentSchema.optional().nullable(),
 })
 
 export const cashPlanLinePatchSchema = z
@@ -62,6 +75,7 @@ export const cashPlanLinePatchSchema = z
     amount: money.optional(),
     expectedDate: optionalIsoDateTime,
     remark: z.string().trim().max(500).optional().nullable(),
+    attachment: lineAttachmentSchema.optional().nullable(),
   })
   .refine((o) => Object.values(o).some((v) => v !== undefined), {
     message: "至少需要提供一个可更新字段",

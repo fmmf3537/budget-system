@@ -107,6 +107,10 @@ type LineRow = {
   amount: string | null
   expectedDate: string | null
   remark: string | null
+  attachmentName: string | null
+  attachmentMime: string | null
+  attachmentUrl: string | null
+  attachmentSize: number | null
 }
 
 type PlanDetail = {
@@ -149,6 +153,11 @@ type SubPlanLineDraft = {
   amount: string
   expectedDate: string
   remark: string
+  attachmentName: string
+  attachmentMime: string
+  attachmentUrl: string
+  attachmentSize: number | null
+  attachmentDataBase64: string
 }
 
 type LineSourceFilter = "ALL" | "MAIN_ONLY" | "SUBPLAN_ONLY"
@@ -223,7 +232,32 @@ function mapLineToSubPlanDraft(line: LineRow): SubPlanLineDraft {
     amount: line.amount ?? "",
     expectedDate: isoDateOnly(line.expectedDate),
     remark: line.remark ?? "",
+    attachmentName: line.attachmentName ?? "",
+    attachmentMime: line.attachmentMime ?? "",
+    attachmentUrl: line.attachmentUrl ?? "",
+    attachmentSize: line.attachmentSize ?? null,
+    attachmentDataBase64: "",
   }
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onerror = () => reject(new Error("文件读取失败"))
+    fr.onload = () => resolve(String(fr.result || ""))
+    fr.readAsDataURL(file)
+  })
+}
+
+function formatFileSize(size: number | null | undefined): string {
+  if (!size || size <= 0) return "—"
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function buildAttachmentHref(attachmentUrl: string): string {
+  return `/api/cash-plan/attachment?url=${encodeURIComponent(attachmentUrl)}`
 }
 
 type CatOpt = { code: string; name: string }
@@ -386,6 +420,10 @@ export function CashPlanDetailView() {
     | null
   >(null)
   const [lineSubmitting, setLineSubmitting] = React.useState(false)
+  const [lineAttachmentFile, setLineAttachmentFile] = React.useState<File | null>(
+    null
+  )
+  const [lineAttachmentClear, setLineAttachmentClear] = React.useState(false)
 
   const [basicSaving, setBasicSaving] = React.useState(false)
 
@@ -759,6 +797,8 @@ export function CashPlanDetailView() {
           row: LineRow
         }
   ) {
+    setLineAttachmentFile(null)
+    setLineAttachmentClear(false)
     if (spec.mode === "add") {
       lineForm.reset({
         category: "",
@@ -782,6 +822,20 @@ export function CashPlanDetailView() {
     if (!lineDialog || !id) return
     setLineSubmitting(true)
     try {
+      let attachmentPayload:
+        | { name: string; mime: string | null; dataBase64: string }
+        | null
+        | undefined
+      if (lineAttachmentClear) attachmentPayload = null
+      else if (lineAttachmentFile) {
+        const dataBase64 = await readFileAsDataUrl(lineAttachmentFile)
+        attachmentPayload = {
+          name: lineAttachmentFile.name,
+          mime: lineAttachmentFile.type || null,
+          dataBase64,
+        }
+      } else attachmentPayload = undefined
+
       const body = {
         category: values.category?.trim() || null,
         amount: values.amount.trim(),
@@ -789,6 +843,9 @@ export function CashPlanDetailView() {
           ? toIsoDateEndOfDay(values.expectedDate.trim())
           : null,
         remark: values.remark?.trim() || null,
+        ...(attachmentPayload !== undefined
+          ? { attachment: attachmentPayload }
+          : {}),
       }
       if (lineDialog.mode === "add") {
         const path =
@@ -824,6 +881,8 @@ export function CashPlanDetailView() {
         toast.success("已更新")
       }
       setLineDialog(null)
+      setLineAttachmentFile(null)
+      setLineAttachmentClear(false)
       await loadPlan()
       await loadForecast()
     } catch {
@@ -1198,6 +1257,54 @@ export function CashPlanDetailView() {
     await loadSubPlanAggregate()
   }
 
+  async function onSubPlanDraftAttachmentChange(
+    kind: "income" | "expense",
+    idx: number,
+    file: File | null
+  ) {
+    if (!file) return
+    try {
+      const dataBase64 = await readFileAsDataUrl(file)
+      const patch = {
+        attachmentName: file.name,
+        attachmentMime: file.type || "",
+        attachmentSize: file.size,
+        attachmentDataBase64: dataBase64,
+        attachmentUrl: "",
+      }
+      if (kind === "income") {
+        setSubPlanDraftIncomes((prev) =>
+          prev.map((x, i) => (i === idx ? { ...x, ...patch } : x))
+        )
+      } else {
+        setSubPlanDraftExpenses((prev) =>
+          prev.map((x, i) => (i === idx ? { ...x, ...patch } : x))
+        )
+      }
+    } catch {
+      toast.error("附件读取失败")
+    }
+  }
+
+  function clearSubPlanDraftAttachment(kind: "income" | "expense", idx: number) {
+    const patch = {
+      attachmentName: "",
+      attachmentMime: "",
+      attachmentSize: null as number | null,
+      attachmentDataBase64: "",
+      attachmentUrl: "",
+    }
+    if (kind === "income") {
+      setSubPlanDraftIncomes((prev) =>
+        prev.map((x, i) => (i === idx ? { ...x, ...patch } : x))
+      )
+    } else {
+      setSubPlanDraftExpenses((prev) =>
+        prev.map((x, i) => (i === idx ? { ...x, ...patch } : x))
+      )
+    }
+  }
+
   function openSubPlanEdit(s: SubPlanDetail) {
     setEditingSubPlan(s)
     setSubPlanDraftName(s.name?.trim() || "")
@@ -1225,6 +1332,23 @@ export function CashPlanDetailView() {
               ? toIsoDateEndOfDay(r.expectedDate.trim())
               : null,
             remark: r.remark.trim() || null,
+            attachment:
+              r.attachmentDataBase64.trim() || r.attachmentUrl.trim()
+                ? {
+                    name:
+                      r.attachmentName.trim() ||
+                      (r.attachmentDataBase64
+                        ? "line-attachment"
+                        : "existing-attachment"),
+                    mime: r.attachmentMime.trim() || null,
+                    ...(r.attachmentDataBase64.trim()
+                      ? { dataBase64: r.attachmentDataBase64.trim() }
+                      : {
+                          url: r.attachmentUrl.trim(),
+                          size: r.attachmentSize ?? null,
+                        }),
+                  }
+                : null,
           }))
           .filter((r) => r.amount !== "")
       const res = await fetch(`/api/cash-plan/sub-plan/${editingSubPlan.id}`, {
@@ -1766,6 +1890,7 @@ export function CashPlanDetailView() {
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
                       <TableHead>提交人</TableHead>
+                      <TableHead>附件</TableHead>
                       <TableHead>备注</TableHead>
                       <TableHead className="w-[100px]" />
                     </TableRow>
@@ -1774,7 +1899,7 @@ export function CashPlanDetailView() {
                     {inflowDisplayRows.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className="text-muted-foreground h-16 text-center"
                         >
                           暂无流入明细
@@ -1803,6 +1928,20 @@ export function CashPlanDetailView() {
                             {r.row.amount ?? "—"}
                           </TableCell>
                           <TableCell className="text-sm">{r.submitter}</TableCell>
+                          <TableCell className="text-sm">
+                            {r.row.attachmentUrl ? (
+                              <a
+                                href={buildAttachmentHref(r.row.attachmentUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary underline"
+                              >
+                                {r.row.attachmentName || "查看附件"}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.row.remark ?? "—"}
                           </TableCell>
@@ -1958,6 +2097,7 @@ export function CashPlanDetailView() {
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
                       <TableHead>提交人</TableHead>
+                      <TableHead>附件</TableHead>
                       <TableHead>备注</TableHead>
                       <TableHead className="w-[100px]" />
                     </TableRow>
@@ -1966,7 +2106,7 @@ export function CashPlanDetailView() {
                     {outflowDisplayRows.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className="text-muted-foreground h-16 text-center"
                         >
                           暂无流出明细
@@ -1995,6 +2135,20 @@ export function CashPlanDetailView() {
                             {r.row.amount ?? "—"}
                           </TableCell>
                           <TableCell className="text-sm">{r.submitter}</TableCell>
+                          <TableCell className="text-sm">
+                            {r.row.attachmentUrl ? (
+                              <a
+                                href={buildAttachmentHref(r.row.attachmentUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary underline"
+                              >
+                                {r.row.attachmentName || "查看附件"}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.row.remark ?? "—"}
                           </TableCell>
@@ -2549,6 +2703,7 @@ export function CashPlanDetailView() {
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
                       <TableHead>提交人</TableHead>
+                      <TableHead>附件</TableHead>
                       <TableHead>备注</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2556,7 +2711,7 @@ export function CashPlanDetailView() {
                     {viewingSubPlan.incomes.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={6}
                           className="text-muted-foreground h-12 text-center"
                         >
                           无流入明细
@@ -2578,6 +2733,20 @@ export function CashPlanDetailView() {
                               viewingSubPlan.createdById ||
                               "未知"}
                           </TableCell>
+                          <TableCell className="text-sm">
+                            {r.attachmentUrl ? (
+                              <a
+                                href={buildAttachmentHref(r.attachmentUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary underline"
+                              >
+                                {r.attachmentName || "查看附件"}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.remark ?? "—"}
                           </TableCell>
@@ -2598,6 +2767,7 @@ export function CashPlanDetailView() {
                       <TableHead>预计日期</TableHead>
                       <TableHead className="text-right">金额</TableHead>
                       <TableHead>提交人</TableHead>
+                      <TableHead>附件</TableHead>
                       <TableHead>备注</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2605,7 +2775,7 @@ export function CashPlanDetailView() {
                     {viewingSubPlan.expenses.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={6}
                           className="text-muted-foreground h-12 text-center"
                         >
                           无流出明细
@@ -2626,6 +2796,20 @@ export function CashPlanDetailView() {
                               viewingSubPlan.createdByEmail?.trim() ||
                               viewingSubPlan.createdById ||
                               "未知"}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {r.attachmentUrl ? (
+                              <a
+                                href={buildAttachmentHref(r.attachmentUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary underline"
+                              >
+                                {r.attachmentName || "查看附件"}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
                           </TableCell>
                           <TableCell className="text-muted-foreground max-w-[220px] truncate text-sm">
                             {r.remark ?? "—"}
@@ -2712,7 +2896,17 @@ export function CashPlanDetailView() {
                   onClick={() =>
                     setSubPlanDraftIncomes((prev) => [
                       ...prev,
-                      { category: "", amount: "", expectedDate: "", remark: "" },
+                      {
+                        category: "",
+                        amount: "",
+                        expectedDate: "",
+                        remark: "",
+                        attachmentName: "",
+                        attachmentMime: "",
+                        attachmentUrl: "",
+                        attachmentSize: null,
+                        attachmentDataBase64: "",
+                      },
                     ])
                   }
                 >
@@ -2725,6 +2919,7 @@ export function CashPlanDetailView() {
                     <TableHead>类别</TableHead>
                     <TableHead>金额</TableHead>
                     <TableHead>日期</TableHead>
+                    <TableHead>附件</TableHead>
                     <TableHead>备注</TableHead>
                     <TableHead className="w-[80px]" />
                   </TableRow>
@@ -2773,6 +2968,46 @@ export function CashPlanDetailView() {
                         />
                       </TableCell>
                       <TableCell>
+                        <div className="grid gap-1">
+                          <Input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.xlsx,.doc,.docx"
+                            onChange={(e) =>
+                              void onSubPlanDraftAttachmentChange(
+                                "income",
+                                idx,
+                                e.target.files?.[0] ?? null
+                              )
+                            }
+                          />
+                          {r.attachmentUrl ? (
+                            <a
+                              href={buildAttachmentHref(r.attachmentUrl)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary text-xs underline"
+                            >
+                              {r.attachmentName || "查看附件"}
+                            </a>
+                          ) : null}
+                          {r.attachmentName ? (
+                            <p className="text-xs text-muted-foreground">
+                              {r.attachmentName}（{formatFileSize(r.attachmentSize)}）
+                            </p>
+                          ) : null}
+                          {(r.attachmentName || r.attachmentUrl) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => clearSubPlanDraftAttachment("income", idx)}
+                            >
+                              清除附件
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <Input
                           value={r.remark}
                           onChange={(e) =>
@@ -2814,7 +3049,17 @@ export function CashPlanDetailView() {
                   onClick={() =>
                     setSubPlanDraftExpenses((prev) => [
                       ...prev,
-                      { category: "", amount: "", expectedDate: "", remark: "" },
+                      {
+                        category: "",
+                        amount: "",
+                        expectedDate: "",
+                        remark: "",
+                        attachmentName: "",
+                        attachmentMime: "",
+                        attachmentUrl: "",
+                        attachmentSize: null,
+                        attachmentDataBase64: "",
+                      },
                     ])
                   }
                 >
@@ -2827,6 +3072,7 @@ export function CashPlanDetailView() {
                     <TableHead>类别</TableHead>
                     <TableHead>金额</TableHead>
                     <TableHead>日期</TableHead>
+                    <TableHead>附件</TableHead>
                     <TableHead>备注</TableHead>
                     <TableHead className="w-[80px]" />
                   </TableRow>
@@ -2873,6 +3119,46 @@ export function CashPlanDetailView() {
                             )
                           }
                         />
+                      </TableCell>
+                      <TableCell>
+                        <div className="grid gap-1">
+                          <Input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.xlsx,.doc,.docx"
+                            onChange={(e) =>
+                              void onSubPlanDraftAttachmentChange(
+                                "expense",
+                                idx,
+                                e.target.files?.[0] ?? null
+                              )
+                            }
+                          />
+                          {r.attachmentUrl ? (
+                            <a
+                              href={buildAttachmentHref(r.attachmentUrl)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary text-xs underline"
+                            >
+                              {r.attachmentName || "查看附件"}
+                            </a>
+                          ) : null}
+                          {r.attachmentName ? (
+                            <p className="text-xs text-muted-foreground">
+                              {r.attachmentName}（{formatFileSize(r.attachmentSize)}）
+                            </p>
+                          ) : null}
+                          {(r.attachmentName || r.attachmentUrl) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => clearSubPlanDraftAttachment("expense", idx)}
+                            >
+                              清除附件
+                            </Button>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Input
@@ -2931,7 +3217,11 @@ export function CashPlanDetailView() {
       <Dialog
         open={lineDialog !== null}
         onOpenChange={(o) => {
-          if (!o) setLineDialog(null)
+          if (!o) {
+            setLineDialog(null)
+            setLineAttachmentFile(null)
+            setLineAttachmentClear(false)
+          }
         }}
       >
         <DialogContent>
@@ -3004,6 +3294,56 @@ export function CashPlanDetailView() {
                   </FormItem>
                 )}
               />
+              <div className="grid gap-2">
+                <Label htmlFor="cash-line-attachment">附件（可选）</Label>
+                <Input
+                  id="cash-line-attachment"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.xlsx,.doc,.docx"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    setLineAttachmentFile(f)
+                    if (f) setLineAttachmentClear(false)
+                  }}
+                />
+                {lineDialog?.mode === "edit" &&
+                lineDialog.row.attachmentUrl &&
+                !lineAttachmentClear ? (
+                  <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                    <a
+                      href={buildAttachmentHref(lineDialog.row.attachmentUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline"
+                    >
+                      当前附件：{lineDialog.row.attachmentName || "查看"}
+                    </a>
+                    <span>({formatFileSize(lineDialog.row.attachmentSize)})</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setLineAttachmentClear(true)
+                        setLineAttachmentFile(null)
+                      }}
+                    >
+                      移除附件
+                    </Button>
+                  </div>
+                ) : null}
+                {lineAttachmentClear ? (
+                  <p className="text-xs text-muted-foreground">
+                    已选择移除附件，保存后生效。
+                  </p>
+                ) : null}
+                {lineAttachmentFile ? (
+                  <p className="text-xs text-muted-foreground">
+                    待上传：{lineAttachmentFile.name}（
+                    {formatFileSize(lineAttachmentFile.size)}）
+                  </p>
+                ) : null}
+              </div>
               <DialogFooter>
                 <Button
                   type="button"

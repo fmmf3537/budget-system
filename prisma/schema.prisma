@@ -537,6 +537,10 @@ model CashPlanSubPlanIncome {
   amount       Decimal   @db.Decimal(18, 2)
   expectedDate DateTime?
   remark       String?
+  attachmentName String?
+  attachmentMime String?
+  attachmentUrl  String?
+  attachmentSize Int?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -553,6 +557,10 @@ model CashPlanSubPlanExpense {
   amount       Decimal   @db.Decimal(18, 2)
   expectedDate DateTime?
   remark       String?
+  attachmentName String?
+  attachmentMime String?
+  attachmentUrl  String?
+  attachmentSize Int?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -569,6 +577,10 @@ model CashPlanIncome {
   amount        Decimal   @db.Decimal(18, 2)
   expectedDate  DateTime?
   remark        String?
+  attachmentName String?
+  attachmentMime String?
+  attachmentUrl  String?
+  attachmentSize Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -585,6 +597,10 @@ model CashPlanExpense {
   amount        Decimal   @db.Decimal(18, 2)
   expectedDate  DateTime?
   remark        String?
+  attachmentName String?
+  attachmentMime String?
+  attachmentUrl  String?
+  attachmentSize Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
